@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
+from scipy.ndimage import median_filter
 
 def get_volume_properties(obj_fname):
     obj_model = np.load(obj_fname, mmap_mode="r")
@@ -26,7 +27,12 @@ class ObjectCreator(object):
         material_model[object_volume > main_thr] = 1
         
         foreign_thr = thresholds[1]
-        material_model[object_volume > foreign_thr] = 2
+        print(object_volume.shape[0])
+        
+        for i in range(object_volume.shape[0]):
+            filter_slice = median_filter(object_volume[i,:,:], 3)
+            discr_slice = filter_slice > foreign_thr
+            material_model[i,discr_slice] = 2
         
         self.volume = material_model
         self.main_object[material_model == 1] = 1.0

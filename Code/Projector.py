@@ -3,11 +3,9 @@ import numpy as np
 import math as m
 import matplotlib.pyplot as plt
 import imageio
-from tqdm import tqdm
 from pathlib import Path
-from scipy import ndimage, misc
+from scipy import ndimage
 import flexdata
-import random
 
 from ObjectCreator import ObjectCreator, get_volume_properties
 from MaterialHandler import MaterialHandler
@@ -21,13 +19,19 @@ class Projector(object):
         self.num_angles = num_angles
         self.energy_bins = self.obj.energy_bins
         self.energy_model = config['energy_model']
+        self.noise_flag = config['noise']
+        self.save_noiseless_flag = config['save_noiseless']
+        # Test this code
+        if self.noise_flag == False:
+            self.save_noiseless_flag = True
         
-    def read_flexray_geometry(self, path):
+    def read_flexray_geometry(self, path, ang_range):
         self.geom = flexdata.data.read_flexraylog(path)
         
         # Calibration fixes
         self.geom.parameters['src_ort'] += (7-5.5) #see below for flexbox hard coded values
         self.geom['det_roll'] -= 0.25
+        self.geom.parameters['ang_range'] = ang_range
         
         obj_shape = self.obj.size
         width = obj_shape[2]
@@ -44,6 +48,16 @@ class Projector(object):
         self.obj.voxel_size = self.geom.parameters['img_pixel']
         #print(self.obj.voxel_size)
         #self.transform_foreign_geometry(zoom_factor = 0.7, translation_vector = [0.,0.,0.])
+        
+    def transform_main_geometry(self, zoom_vector):
+        self.vol_geom = self.geom.astra_volume_geom(self.obj.size)
+        
+        self.vol_geom['option']['WindowMinX'] *= zoom_vector[0]
+        self.vol_geom['option']['WindowMaxX'] *= zoom_vector[0]
+        self.vol_geom['option']['WindowMinY'] *= zoom_vector[1]
+        self.vol_geom['option']['WindowMaxY'] *= zoom_vector[1]
+        self.vol_geom['option']['WindowMinZ'] *= zoom_vector[2]
+        self.vol_geom['option']['WindowMaxZ'] *= zoom_vector[2]
         
     def transform_foreign_geometry(self, zoom_factor, translation_vector):
         self.foreign_vol_geom = self.geom.astra_volume_geom(self.obj.size)
@@ -128,10 +142,19 @@ class Projector(object):
         folder = folder / "{}".format(voltage)
         (folder / "Proj").mkdir(exist_ok=True)
         (folder / "Log").mkdir(exist_ok=True)
+        if self.save_noiseless_flag:
+            (folder / "Noiseless").mkdir(exist_ok=True)
         
         ff = self.noise.create_flatfield_image(voltage)
         proj = self.fp(voltage)
-        proj = self.noise.add_noise(proj)
+        
+        if self.save_noiseless_flag:
+            log_noiseless = -np.log(np.divide(proj, ff))
+            for i in range(self.num_angles):
+                imageio.imsave(folder / 'Noiseless' / '{}.tiff'.format(start_num+i), log_noiseless[:,i,:].astype(np.float32))
+        
+        if self.noise_flag:
+            proj = self.noise.add_noise(proj)
         log = -np.log(np.divide(proj, ff))
         
         for i in range(self.num_angles):
@@ -149,43 +172,36 @@ class Projector(object):
         for i in range(self.num_angles):
             imageio.imsave(folder / '{}.tiff'.format(start_num+i), gt[:,i,:].astype(np.int32))
         
-def default_process(obj_folder, out_folder, config):
+def default_process_fod(obj_folder, out_folder, config):
     model_fname = obj_folder / "recon" / "volume.npy"
     obj_shape = get_volume_properties(model_fname)
     energy_bins = 100
     mat = MaterialHandler(energy_bins)
     obj = ObjectCreator(obj_shape, energy_bins)
-    vol = obj.create_flexray_volume(model_fname, [0.02, 0.07])
+    vol = obj.create_flexray_volume(model_fname, [0.025, 0.07])
     
-    num_angles = 20
+    num_angles = 450
     noise = NoiseModel((obj_shape[0], num_angles, obj_shape[2]))
     proj = Projector(obj, mat, noise, num_angles, config)
-    proj.read_flexray_geometry(obj_folder)
     
-    #proj.create_projection(0, our_folder / "50", 50)
-    #proj.create_projection(0, our_folder, 80)
-    #proj.create_gt(0, our_folder)
-    
-    sample_size = 20
-    zooms = np.random.uniform(0.4, 1.1, sample_size)
-    shift_x = np.random.uniform(-150., 0., sample_size)
-    shift_y = np.random.uniform(-10., 10., sample_size)
-    shift_z = np.random.uniform(-50., 20., sample_size)
-    print(zooms)
-    print(shift_x)
-    print(shift_y)
-    print(shift_z)
-    
-    for i in range(sample_size):
-        proj.transform_foreign_geometry(zooms[i], [shift_x[i], shift_y[i], shift_z[i]])
-        proj.create_projection(i*num_angles, our_folder, 80)
-        proj.create_gt(i*num_angles, our_folder)
+    for i in range(4):
+        proj.read_flexray_geometry(obj_folder, (90*i, 90*i+90))
+        print(proj.geom.parameters)
+        proj.create_projection(i*num_angles, out_folder, 90)
+        proj.create_gt(i*num_angles, out_folder)
 
 if __name__ == "__main__":
-    obj_folder = Path("/export/scratch2/vladysla/Data/Real/20.07.2021_playdoh/fo1_scan/")
-    our_folder = Path("../Data")
+    obj_folder = Path("../../../Data/Real/AutomatedFOD/Object42_Scan20W/")
+    out_folder = Path("../Data")
     config = {
-        'energy_model' : 'poly'
+        'energy_model' : 'poly',
+        'noise' : True,
+        'save_noiseless' : True
         }
     
-    default_process(obj_folder, our_folder, config)
+    np.random.seed(seed = 3)
+    
+    #default_process_augment(obj_folder, out_folder, config)
+    default_process_fod(obj_folder, out_folder, config)
+    convert_folder = Path("../../../Data/Simulated/AutomatedFOD")
+    convert(out_folder, convert_folder, "obj42")

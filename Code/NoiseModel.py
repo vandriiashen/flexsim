@@ -8,7 +8,7 @@ class NoiseModel(object):
         self.proj_shape = proj_shape
     
     def get_flatfield_intensity(self, voltage):
-        return 11000.
+        return 6461.
     
     def create_flatfield_image(self, voltage):
         ff = np.zeros(self.proj_shape, dtype=float)
@@ -18,14 +18,18 @@ class NoiseModel(object):
     def add_poisson(self, proj):
         # True value
         # g = 1./2.4
-        # Arbitrary one
-        g = 1./20.
+        # High noise
+        # g = 1./27.
+        g = 1./16.
         res = np.random.poisson(g * proj)
         res = res.astype(float) / g
         return res
     
     def add_gaussian(self, proj):
-        proj += np.random.normal(0, 20.)
+        # proj += np.random.normal(0, 20.)
+        # High noise
+        # proj += np.random.normal(0, 150., size=proj.shape)
+        proj += np.random.normal(0, 120., size=proj.shape)
         return proj
     
     def add_blur(self, proj):
