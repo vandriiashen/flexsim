@@ -4,11 +4,23 @@ from scipy.interpolate import interp1d
 from pathlib import Path
 
 class MaterialHandler(object):
-    def __init__(self, energy_bins):
+    def __init__(self, energy_bins, mat_config):
         self.energy_bins = energy_bins
         # Attenuation coefficient is in 1/cm, but detector config has distances in mm
         self.units_correction = 0.1
+        self.extract_data_from_config(mat_config)
         
+    def extract_data_from_config(self, mat_config):
+        print(mat_config)
+        self.mat_count = mat_config['material_count']
+        self.name = ['Background']
+        self.lac = [0.]
+        self.curve_fname = ['-']
+        for i in range(1, self.mat_count+1):
+            self.name.append(mat_config['name_{}'.format(i)])
+            self.lac.append(mat_config['lac_{}'.format(i)])
+            self.curve_fname.append(mat_config['curve_{}'.format(i)])
+    
     def get_curve(self, fname):
         nist_data = np.loadtxt(fname)
         f_interp = interp1d(nist_data[:,0], nist_data[:,1], kind="linear")
@@ -19,12 +31,17 @@ class MaterialHandler(object):
         return curve
     
     def get_material_curve(self, num):
+        '''
         if num == 1:
             # this is added to make absorption more similar to real data
             arbitrary_density_coefficient = 0.8
             return self.get_curve("../Materials/playdoh.txt") * self.units_correction * arbitrary_density_coefficient
         if num == 2:
             return self.get_curve("../Materials/silicate.txt") * self.units_correction
+        '''
+        attenuation_curve = self.get_curve(self.curve_fname[num])
+        res = attenuation_curve * self.units_correction
+        return res
         
     def spectrum_generate(self, voltage):
         coeff = np.loadtxt('../Materials/tasmip_coeff.txt')
@@ -37,11 +54,9 @@ class MaterialHandler(object):
         spectrum /= np.sum(spectrum)
         return spectrum
     
-    def get_monochromatic_intensity(self, mat_num, voltage):
-        mat_curve = self.get_material_curve(mat_num)
-        spectrum = self.spectrum_generate(voltage)
-        mono_intensity = np.dot(mat_curve, spectrum)
-        return mono_intensity
+    def get_monochromatic_intensity(self, num, voltage):
+        lac = self.lac[num]
+        return lac
         
     def show_material_curve(self):
         x_range = np.arange(0,self.energy_bins)
