@@ -158,8 +158,10 @@ class ObjectCreator(object):
             
             self.volume[material_mask == 1] = i
             
+            
         cylinder_mask = self.create_cylinder(param)
         self.volume[np.logical_and(self.volume == 2, cylinder_mask)] = 3
+        self.volume[np.logical_and(object_volume == 5, cylinder_mask)] = 3
         
         return self.volume
     
@@ -170,14 +172,3 @@ class ObjectCreator(object):
         h = self.volume.shape[0]
         for i in range(h):
             imageio.imsave(folder / '{:06d}.tiff'.format(i), self.volume[i,:,:].astype(np.int32))
-        
-    
-if __name__ == "__main__":
-    obj_folder = Path("../../../Data/Real/AutomatedFOD/Object42_Scan20W/")
-    model_fname = obj_folder / "recon" / "volume.npy"
-    obj_shape = get_volume_properties(model_fname)
-    energy_bins = 100
-    obj_creator = ObjectCreator(obj_shape, energy_bins)
-    vol = obj_creator.create_flexray_volume(model_fname, [0.025, 0.07])
-    
-    imageio.imsave("../Data/slice.png", obj_creator.volume[430,:,:])

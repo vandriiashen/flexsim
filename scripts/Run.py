@@ -5,10 +5,7 @@ from scipy import ndimage
 from tqdm import tqdm
 from configparser import ConfigParser
 
-from ObjectCreator import ObjectCreator, get_volume_properties
-from MaterialHandler import MaterialHandler
-from NoiseModel import NoiseModel
-from Projector import Projector
+import flexsim
         
 def default_process_augment(obj_folder, out_folder, aug_samples, aug_angles, config):
     model_fname = obj_folder / "recon" / "volume.npy"
@@ -69,38 +66,45 @@ def default_process_fod(obj_folder, out_folder, sim_config, mat_config):
         proj.read_flexray_geometry(obj_folder / "good", (90*i, 90*i+90))
         print(proj.geom.parameters)
         log = proj.create_projection(i*num_angles, out_folder, 70)
-        #proj.create_reconstruction(log, i*num_angles, out_folder, 70)
+        proj.create_reconstruction(log, i*num_angles, out_folder, 70)
         proj.create_gt(i*num_angles, out_folder)
         
-def walnut_tunnel(obj_folder, out_folder, aug_samples, aug_angles, sim_config, mat_config):
-    model_fname = obj_folder / "segm.npy"
-    obj_shape = get_volume_properties(model_fname)
-    energy_bins = 100
-    mat = MaterialHandler(energy_bins, mat_config)
+def walnut_tunnel(obj_folder, out_folder, aug_samples, sim_config, mat_config):
+    num_angles = sim_config['num_angles']
+    energy_bins = sim_config['energy_bins']
     
-    num_angles = aug_angles
+    model_fname = obj_folder / "segm.npy"
+    obj_shape = flexsim.get_volume_properties(model_fname)
+    proj_shape = (obj_shape[0], num_angles, obj_shape[2])
+    mat = flexsim.MaterialHandler(energy_bins, mat_config)
+    
     sample_size = aug_samples
     
-    n_x = np.random.uniform(0., 1.0, sample_size)
-    n_y = np.random.uniform(0., 1.0, sample_size)
-    n_z = np.random.uniform(0., 1.0, sample_size)
+    n_x = np.random.uniform(-1., 1.0, sample_size)
+    n_y = np.random.uniform(-1., 1.0, sample_size)
+    n_z = np.random.uniform(-1., 1.0, sample_size)
     a_x = np.random.uniform(400., 600.0, sample_size)
-    a_y = np.random.uniform(400., 600.0, sample_size)
-    a_z = np.random.uniform(300., 300.0, sample_size)
-    radius = np.random.uniform(30., 80.0, sample_size)
+    a_y = np.random.uniform(300., 550.0, sample_size)
+    a_z = np.random.uniform(400., 400.0, sample_size)
+    radius = np.random.uniform(20., 30.0, sample_size)
     
     for i in tqdm(range(sample_size)):
-        obj = ObjectCreator(obj_shape, energy_bins, mat)
+        obj = flexsim.ObjectCreator(obj_shape, energy_bins, mat)
         param = {'n_x' : n_x[i], 'n_y' : n_y[i], 'n_z' : n_z[i],
                  'a_x' : a_x[i], 'a_y' : a_y[i], 'a_z' : a_z[i],
                  'radius' : radius[i]}
+        print(param)
         vol = obj.create_flexray_volume(model_fname, param)
-        noise = NoiseModel((obj_shape[0], num_angles, obj_shape[2]))
-        proj = Projector(obj, mat, noise, num_angles, sim_config)
+        noise = flexsim.NoiseModel(proj_shape)
+        proj = flexsim.Projector(obj, mat, noise, sim_config)
         proj.read_flexray_geometry(obj_folder / "good", (i, 360+i))
+    
+        if i == 1:
+            print("Voxel size = ", obj.voxel_size)
     
         proj.create_projection(i*num_angles, out_folder, 70)
         proj.create_gt(i*num_angles, out_folder)
+        #obj.save_volume(out_folder)
     
 def convert(inp_folder, out_folder, obj_name, aug_samples, aug_angles):
     gt_folder = convert_folder / "gt_{}".format(obj_name)
@@ -134,6 +138,8 @@ if __name__ == "__main__":
     convert_name = Path(config['Paths']['convert_name'])
     
     sim_config = config['Simulation']
+    sim_config['num_angles'] = int(parser['Simulation'].get('num_angles', 1))
+    sim_config['energy_bins'] = int(parser['Simulation'].get('energy_bins', 1))
     sim_config['noise'] = parser['Simulation'].getboolean('noise')
     sim_config['save_noiseless'] = parser['Simulation'].getboolean('save_noiseless')
     
@@ -144,10 +150,9 @@ if __name__ == "__main__":
         mat_config[par_name] = float(parser['Materials'].get(par_name, 0.))
     
     aug_samples = int(parser['Extra'].get('augmentation_samples', 1))
-    aug_angles = int(parser['Extra'].get('augmentation_angles', 1))
 
-    np.random.seed(seed = 3)
+    np.random.seed(seed = 6)
     #default_process_fod(obj_folder, out_folder, sim_config, mat_config)
-    walnut_tunnel(obj_folder, out_folder, aug_samples, aug_angles, sim_config, mat_config)
+    walnut_tunnel(obj_folder, out_folder, aug_samples, sim_config, mat_config)
     #default_process_augment(obj_folder, out_folder, aug_samples, aug_angles, sim_config)
     #convert(out_folder, convert_folder, convert_name, aug_samples, aug_angles)

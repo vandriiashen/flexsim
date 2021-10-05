@@ -1,4 +1,6 @@
-Code/__pycache__/*
-Code/config.ini
+flexsim/__pycache__/*
+scripts/*.ini
 Data/*
-
+doc/_build/*
+doc/_static/*
+doc/_templates/*

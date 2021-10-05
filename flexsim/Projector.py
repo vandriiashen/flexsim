@@ -7,21 +7,31 @@ from pathlib import Path
 from scipy import ndimage
 import flexdata
 
-from ObjectCreator import ObjectCreator, get_volume_properties
-from MaterialHandler import MaterialHandler
-from NoiseModel import NoiseModel
-
 class Projector(object):
-    def __init__(self, objCreator, matHandler, noiseModel, num_angles, config):
+    """Class performing forward projection and generation of data
+    
+    :param obj: instance of Object Creator providing object's model
+    :type obj: :class:`ObjectCreator`
+    :param mat: instance of Material Handler providing absorption properties of project_materials
+    :type mat: :class:`MaterialHandler`
+    :param noise: instance of Noise Model providing noise parameters
+    :type noise: :class:`NoiseModel`
+    :param config: Dictionary of config parameters: number of angles, energy model, number of energy bins, noise flags
+    :type config: :class:`dict`
+    
+    """
+    def __init__(self, objCreator, matHandler, noiseModel, config):
+        """Constructor method
+        """
         self.obj = objCreator
         self.mat = matHandler
         self.noise = noiseModel
-        self.num_angles = num_angles
-        self.energy_bins = self.obj.energy_bins
+        self.num_angles = config['num_angles']
+        self.energy_bins = config['energy_bins']
         self.energy_model = config['energy_model']
         self.noise_flag = config['noise']
         self.save_noiseless_flag = config['save_noiseless']
-        # Test this code
+
         if self.noise_flag == False:
             self.save_noiseless_flag = True
         
@@ -199,37 +209,3 @@ class Projector(object):
         astra.algorithm.delete(alg_id)
         astra.data3d.delete(rec_id)
         astra.data3d.delete(proj_id)
-        
-def default_process_fod(obj_folder, out_folder, config):
-    model_fname = obj_folder / "recon" / "volume.npy"
-    obj_shape = get_volume_properties(model_fname)
-    energy_bins = 100
-    mat = MaterialHandler(energy_bins)
-    obj = ObjectCreator(obj_shape, energy_bins)
-    vol = obj.create_flexray_volume(model_fname, [0.025, 0.07])
-    
-    num_angles = 450
-    noise = NoiseModel((obj_shape[0], num_angles, obj_shape[2]))
-    proj = Projector(obj, mat, noise, num_angles, config)
-    
-    for i in range(4):
-        proj.read_flexray_geometry(obj_folder, (90*i, 90*i+90))
-        print(proj.geom.parameters)
-        proj.create_projection(i*num_angles, out_folder, 90)
-        proj.create_gt(i*num_angles, out_folder)
-
-if __name__ == "__main__":
-    obj_folder = Path("../../../Data/Real/AutomatedFOD/Object42_Scan20W/")
-    out_folder = Path("../Data")
-    config = {
-        'energy_model' : 'poly',
-        'noise' : True,
-        'save_noiseless' : True
-        }
-    
-    np.random.seed(seed = 3)
-    
-    #default_process_augment(obj_folder, out_folder, config)
-    default_process_fod(obj_folder, out_folder, config)
-    convert_folder = Path("../../../Data/Simulated/AutomatedFOD")
-    convert(out_folder, convert_folder, "obj42")

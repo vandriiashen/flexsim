@@ -97,9 +97,3 @@ class MaterialHandler(object):
         plt.ylabel("LAC, 1/cm", size = 36)
         plt.tight_layout()
         plt.show()
-        
-if __name__ == "__main__":
-    energy_bins = 100
-    mat = MaterialHandler(energy_bins)
-    mat.show_material_curve()
-    mat.show_monochromatic()
