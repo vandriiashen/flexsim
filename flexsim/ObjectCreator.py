@@ -5,36 +5,36 @@ import imageio
 from pathlib import Path
 import cupyx.scipy.ndimage
 
-def get_volume_properties(obj_fname):
-    #obj_model = np.load(obj_fname, mmap_mode="r")[80:-80,35:-35,35:-35]
-    #obj_model = np.load(obj_fname, mmap_mode="r")[:,70:-70,70:-70]
-    obj_model = np.load(obj_fname, mmap_mode="r")[:,:,:]
-    obj_shape = obj_model.shape
-    return obj_shape
+from flexsim import utils
 
 class ObjectCreator(object):
-    def __init__(self, size, energy_bins, matHandler):
-        #size = (x, y, z)
+    '''Class providing object's model. Data augmentation through volume transformation is done here.
+    
+    :param size: Volume shape with 3 dimensions: (height, width, width)
+    :type size: :class:`np.ndarray`
+    :param matHandler: Instance of Material Handler providing information about object's materials.
+    :type matHandler: :class:`MaterialHandler`
+    
+    '''
+    def __init__(self, size, matHandler):
+        '''Constructor method.
+        '''
         self.volume = np.zeros(size, dtype = int)
-        self.energy_bins = energy_bins
         self.size = size
         self.voxel_size = 0.114723907 # in mm, account for this later
         self.mat = matHandler
-        
-    def apply_median_filter(self, object_volume):
-        # Remove outliers for better thresholding
-        vol_gpu = cupy.asarray(object_volume)
-        vol_gpu = cupyx.scipy.ndimage.median_filter(vol_gpu, 3)
-        vol_cpu = vol_gpu.get()
-        
-        mempool = cupy.get_default_memory_pool()
-        pinned_mempool = cupy.get_default_pinned_memory_pool()
-        mempool.free_all_blocks()
-        pinned_mempool.free_all_blocks()
-        
-        return vol_cpu
     
     def shift_volume(self, vol, shift):
+        ''' Shifts the object's volume using GPU acceleration (`cupyx.scipy.ndimage.shift`).
+        
+        :param vol: Array containing the object's model
+        :type vol: :class:`np.ndarray`
+        :param shift: Shift along the axes.
+        :type shift: :class:`float` or :class:`list`
+        :return: Shifted volume
+        :rtype: :class:`np.ndarray`
+        
+        '''
         vol_gpu = cupy.asarray(vol)
         vol_gpu = cupyx.scipy.ndimage.shift(vol_gpu, shift)
         vol_cpu = vol_gpu.get()
@@ -47,6 +47,16 @@ class ObjectCreator(object):
         return vol_cpu
     
     def zoom_volume(self, vol, zoom):
+        ''' Zooms the object's volume using GPU acceleration (`cupyx.scipy.ndimage.zoom`). The same shape is maintained in the output array.
+        
+        :param vol: Array containing the object's model
+        :type vol: :class:`np.ndarray`
+        :param zoom: Zoom along the axes.
+        :type zoom: :class:`float` or :class:`list`
+        :return: Zoomed volume
+        :rtype: :class:`np.ndarray`
+        
+        '''
         old_s = vol.shape
         vol_gpu = cupy.asarray(vol)
         vol_gpu = cupyx.scipy.ndimage.zoom(vol_gpu, zoom)
@@ -63,10 +73,7 @@ class ObjectCreator(object):
                 
         res = vol_cpu[select[0][0]:select[0][1] , select[1][0]:select[1][1] , select[2][0]:select[2][1]]
         res = np.pad(res, pad)
-        #print(old_s)
-        #print(new_s)
-        #print(res.shape)
-        
+
         mempool = cupy.get_default_memory_pool()
         pinned_mempool = cupy.get_default_pinned_memory_pool()
         mempool.free_all_blocks()
@@ -75,6 +82,16 @@ class ObjectCreator(object):
         return res
     
     def affine_volume(self, vol, matrix):
+        '''Performs affine transformation of the object's volume using GPU acceleration (`cupyx.scipy.ndimage.affine_transform`).
+        
+        :param vol: Array containing the object's model
+        :type vol: :class:`np.ndarray`
+        :param matrix: Matrix of the affine transformation
+        :type matrix: :class:`np.ndarray`
+        :return: Transformed volume
+        :rtype: :class:`np.ndarray`
+        
+        '''
         vol_gpu = cupy.asarray(vol)
         mat_gpu = cupy.asarray(matrix)
         vol_gpu = cupyx.scipy.ndimage.affine_transform(vol_gpu, mat_gpu, output_shape=vol.shape)
@@ -87,83 +104,13 @@ class ObjectCreator(object):
 
         return vol_cpu
     
-    def create_spherical_volume(self):
-        print(self.volume.shape)
-        h, d, w = self.volume.shape
-        Z, Y, X = np.ogrid[:h, :d, :w]
-        dist = np.sqrt((Z-350)**2+(Y-400)**2+(X-400)**2)
-        print(Z.shape)
-        print(Y.shape)
-        print(X.shape)
-        print(dist.shape)
-        #print(dist)
-
-        self.volume[dist <= 250] = 2
-        self.volume[dist <= 220] = 0
-        self.volume[dist <= 200] = 1
+    def set_flexray_volume(self, obj_folder):
+        '''Initializes object volume by reading it from the folder
         
-        self.main_object[self.volume == 1] = 1.0
-        self.foreign_object[self.volume == 2] = 1.0
-        
-        return self.volume
-    
-    def create_cylinder(self, param):
-        print(self.volume.shape)
-        h, d, w = self.volume.shape
-        Z, Y, X = np.ogrid[:h, :d, :w]
-        X = X.astype(float)
-        Y = Y.astype(float)
-        Z = Z.astype(float)
-        
-        n = np.array([param['n_x'], param['n_y'], param['n_z']])
-        a = np.array([param['a_x'], param['a_y'], param['a_z']])
-        radius = param['radius']
-        # direction vector should have a norm of 1
-        n /= np.sqrt(np.power(n, 2).sum())
-        X -= a[0]
-        Y -= a[1]
-        Z -= a[2]
-        
-        # distance formula is |(x-a) x n| / |n|
-        dist = np.sqrt( ( Y*n[2] - Z*n[1] )**2 
-                       +( X*n[2] - Z*n[0] )**2
-                       +( X*n[1] - Y*n[0] )**2)
-                
-        res = np.zeros_like(dist, dtype=bool)
-        res[dist <= radius] = True
-        return res
-        
-    def create_flexray_volume(self, model_fname, param):
-        mempool = cupy.get_default_memory_pool()
-        pinned_mempool = cupy.get_default_pinned_memory_pool()
-        
-        object_volume = np.load(model_fname)
-        
-        for i in range(1, self.mat.mat_count+1):
-            material_mask = np.zeros(self.size, dtype=np.int16)
-            
-            material_mask[object_volume == i] = 1
-            
-            # insert volume tranform here
-            #print(shift_v)
-            #foreign_mask = self.shift_volume(foreign_mask, shift_v)
-            #print(zoom_v)
-            #foreign_mask = self.zoom_volume(foreign_mask, fozoom_v)
-            
-            #print(mempool.used_bytes())
-            #print(mempool.total_bytes() / 1024**2)
-            #print(pinned_mempool.n_free_blocks())
-            mempool.free_all_blocks()
-            pinned_mempool.free_all_blocks()
-            
-            self.volume[material_mask == 1] = i
-            
-            
-        cylinder_mask = self.create_cylinder(param)
-        self.volume[np.logical_and(self.volume == 2, cylinder_mask)] = 3
-        self.volume[np.logical_and(object_volume == 5, cylinder_mask)] = 3
-        
-        return self.volume
+        :param obj_folder: Path to the folder containing slices of the segmentation.
+        :type obj_folder: :class:`pathlib.Path`
+        '''
+        self.volume = utils.read_volume(obj_folder)
     
     def save_volume(self, folder):
         (folder / "GT_Recon").mkdir(exist_ok=True)

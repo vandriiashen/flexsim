@@ -8,7 +8,7 @@ from scipy import ndimage
 import flexdata
 
 class Projector(object):
-    """Class performing forward projection and generation of data
+    '''Class performing forward projection and generation of data
     
     :param obj: instance of Object Creator providing object's model
     :type obj: :class:`ObjectCreator`
@@ -19,10 +19,10 @@ class Projector(object):
     :param config: Dictionary of config parameters: number of angles, energy model, number of energy bins, noise flags
     :type config: :class:`dict`
     
-    """
+    '''
     def __init__(self, objCreator, matHandler, noiseModel, config):
-        """Constructor method
-        """
+        '''Constructor method
+        '''
         self.obj = objCreator
         self.mat = matHandler
         self.noise = noiseModel
@@ -102,12 +102,12 @@ class Projector(object):
                 
         return mat_projection
     
-    def mono_fp(self, voltage):
-        ff = self.noise.create_flatfield_image(voltage)
+    def mono_fp(self):
+        ff = self.noise.create_flatfield_image()
         
         att_proj = np.zeros_like(ff, dtype = float)
         for i in range(1, self.mat.mat_count+1):
-            mat_attenuation = self.mat.get_monochromatic_intensity(i, voltage)
+            mat_attenuation = self.mat.get_monochromatic_intensity(i)
             mat_proj = self.project_material(i)
             att_proj += mat_attenuation*mat_proj
             
@@ -116,15 +116,8 @@ class Projector(object):
         return proj
     
     def poly_fp(self, voltage):
-        ff = self.noise.create_flatfield_image(voltage)
+        ff = self.noise.create_flatfield_image()
         proj = np.zeros_like(ff)
-        
-        """
-        main_projection, foreign_projection = self.project_materials()
-        main_attenuation = self.mat.get_material_curve(1)
-        foreign_attenuation = self.mat.get_material_curve(2)
-        spectrum_fractions = self.mat.spectrum_generate(voltage)
-        """
         
         for i in range(self.energy_bins):
             temp_spectral_projection = main_attenuation[i] * main_projection + foreign_attenuation[i] * foreign_projection
@@ -135,10 +128,8 @@ class Projector(object):
     
     def fp(self, voltage):
         if self.energy_model == "mono":
-            #print("Mono")
-            return self.mono_fp(voltage)
+            return self.mono_fp()
         elif self.energy_model == "poly":
-            #print("Poly")
             return self.poly_fp(voltage)
         else:
             print("Unknown energy model, changed to 'mono'")
@@ -152,7 +143,7 @@ class Projector(object):
         if self.save_noiseless_flag:
             (folder / "Noiseless").mkdir(exist_ok=True)
         
-        ff = self.noise.create_flatfield_image(voltage)
+        ff = self.noise.create_flatfield_image()
         proj = self.fp(voltage)
         
         if self.save_noiseless_flag:

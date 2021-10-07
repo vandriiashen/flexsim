@@ -4,14 +4,36 @@ from scipy.interpolate import interp1d
 from pathlib import Path
 
 class MaterialHandler(object):
+    '''Class providing material properties.
+    
+    :param energy_bins: Number of energy bins (step of 1 kV) used for polychromatic simulation
+    :type config: :class:`int`
+    :param mat_config: Dictionary of material properties that contains a number of materials and 3 parameters for every material: name, linear attenuation coefficient (for monochromatic simulation) and a path to attenuation curve file (for polychromatic simulation)
+    :type config: :class:`dict`
+    
+    '''
     def __init__(self, energy_bins, mat_config):
+        '''Constructor method.
+        '''
         self.energy_bins = energy_bins
         # Attenuation coefficient is in 1/cm, but detector config has distances in mm
         self.units_correction = 0.1
         self.extract_data_from_config(mat_config)
         
     def extract_data_from_config(self, mat_config):
-        print(mat_config)
+        '''Builds lists of material parameters based on the config.
+        The expected structure of the config:
+        material_count = N
+        ...
+        name_i = <material name>
+        lac_i = <LAC value for a certain voltage>        
+        curve_i = <Path to a file containing attenuation curve>
+        ...
+        
+        :param mat_config: Dictionary of material properties
+        :type config: :class:`dict`
+        
+        '''
         self.mat_count = mat_config['material_count']
         self.name = ['Background']
         self.lac = [0.]
@@ -22,6 +44,14 @@ class MaterialHandler(object):
             self.curve_fname.append(mat_config['curve_{}'.format(i)])
     
     def get_curve(self, fname):
+        '''Rebins attenuation curve to the number of bins specified in the class instance.
+        
+        :param fname: Path to the file containing attenuation curve
+        :type fname: :class:`string`
+        :return: Rebinned attenuation curve
+        :rtype: :class:`list`
+        
+        '''
         nist_data = np.loadtxt(fname)
         f_interp = interp1d(nist_data[:,0], nist_data[:,1], kind="linear")
         curve = np.zeros((self.energy_bins))
@@ -31,19 +61,27 @@ class MaterialHandler(object):
         return curve
     
     def get_material_curve(self, num):
-        '''
-        if num == 1:
-            # this is added to make absorption more similar to real data
-            arbitrary_density_coefficient = 0.8
-            return self.get_curve("../Materials/playdoh.txt") * self.units_correction * arbitrary_density_coefficient
-        if num == 2:
-            return self.get_curve("../Materials/silicate.txt") * self.units_correction
+        '''Returns attenuation curve corresponding to a certain material.
+        
+        :param num: Material number
+        :type num: :class:`int`
+        :return: Attenuation curve
+        :rtype: :class:`list`
+        
         '''
         attenuation_curve = self.get_curve(self.curve_fname[num])
         res = attenuation_curve * self.units_correction
         return res
         
     def spectrum_generate(self, voltage):
+        '''Generates a spectrum corresponding to a certain tube voltage.
+        
+        :param voltage: Tube voltage
+        :type voltage: :class:`float`
+        :return: Tube spectrum
+        :rtype: :class:`list`
+        
+        '''
         coeff = np.loadtxt('../Materials/tasmip_coeff.txt')
         spectrum = np.zeros((self.energy_bins))
         for i in range(self.energy_bins):
@@ -54,11 +92,21 @@ class MaterialHandler(object):
         spectrum /= np.sum(spectrum)
         return spectrum
     
-    def get_monochromatic_intensity(self, num, voltage):
+    def get_monochromatic_intensity(self, num):
+        '''Gets material's attenuation coefficient based on the config. Attenuation curve is not used.
+        
+        :param num: Material number
+        :type num: :class:`int`
+        :return: LAC value
+        :rtype: :class:`float`
+        
+        '''
         lac = self.lac[num]
         return lac
         
     def show_material_curve(self):
+        '''Test function to show attenuation curves .     
+        '''
         x_range = np.arange(0,self.energy_bins)
         curve1 = self.get_material_curve(1)
         curve2 = self.get_material_curve(2)
@@ -73,27 +121,6 @@ class MaterialHandler(object):
         plt.grid()
         plt.legend(prop={'size': 24})
         plt.xlabel("Energy, keV", size = 36)
-        plt.ylabel("LAC, 1/cm", size = 36)
-        plt.tight_layout()
-        plt.show()
-        
-    def show_monochromatic(self):
-        # from 30 to 90 kV
-        x_range = np.arange(30, 90)
-        
-        curve1 = [self.get_monochromatic_intensity(1, x) for x in x_range]
-        curve2 = [self.get_monochromatic_intensity(2, x) for x in x_range]
-        
-        plt.figure(figsize=(12,8))
-        ax = plt.axes()
-        ax.tick_params(labelsize = 24)
-        
-        plt.plot(x_range, curve1, label="Approximate play-doh attenuation")
-        plt.plot(x_range, curve2, label="Silicate")
-        
-        plt.grid()
-        plt.legend(prop={'size': 24})
-        plt.xlabel("Voltage, kV", size = 36)
         plt.ylabel("LAC, 1/cm", size = 36)
         plt.tight_layout()
         plt.show()

@@ -1,9 +1,11 @@
-Welcome to FleXray Simulation's documentation!
+Welcome to flexsim's documentation!
 ==============================================
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
+   
+   class
 
 Indices and tables
 ==================
