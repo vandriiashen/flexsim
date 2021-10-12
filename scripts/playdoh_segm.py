@@ -7,8 +7,9 @@ from flexdata import data
 from flextomo import projector
 from flexcalc import process
 import scipy.ndimage
+import scipy.stats
+import matplotlib.pyplot as plt
 from tqdm import tqdm
-import flexsim
 
 def reconstruct(input_folder):
     '''Reconstructs the volume using flexbox. Slices will be written to recon/ subfolder.
@@ -73,6 +74,42 @@ def check_intensity(input_folder):
     print("Playdoh intensity std = {}".format(playdoh_std))
     print("Stone mean intensity = {}".format(stone_mean))
     print("Stone intensity std = {}".format(stone_std))
+    
+def extract_noise_properties(input_folder):
+    '''Gets an approximate value of noise properties based on a projection and a flatfield.
+    Computes statistic properties of the intensity in a window around every pixel. Then it is assumed that the relation between mean value and std is sigma^2 = alpha mu + sigma_gaussian^2.
+    '''
+    path = Path(input_folder)
+    ff = imageio.imread(path / "io{:06d}.tif".format(0))
+    df = imageio.imread(path / "di{:06d}.tif".format(0))
+    proj = imageio.imread(path / "scan_{:06d}.tiff".format(0))
+    proj -= df
+    ff -= df
+    log = -np.log(np.divide(proj, ff))
+    
+    background_mask = log < 0.4
+    object_mask = np.logical_not(background_mask)
+    
+    flatfield_value = ff.mean()
+    
+    mean_proj = np.zeros_like(proj)
+    sigma_proj = np.zeros_like(proj)
+    window_size = 9
+    hs = window_size // 2
+    for i in tqdm(range(400, 450)):
+        for j in range(400, 450):
+            mean_proj[i,j] = proj[i-hs:i+hs,j-hs:j+hs].mean()
+            sigma_proj[i,j] = np.power(proj[i-hs:i+hs,j-hs:j+hs].std(), 2)
+    
+    #plt.imshow(sigma_proj)
+    plt.scatter(mean_proj[400:450,400:450].ravel(), sigma_proj[400:450,400:450].ravel())
+    result = scipy.stats.linregress(mean_proj[400:450,400:450].ravel(), sigma_proj[400:450,400:450].ravel())
+    print(result.slope)
+    print(result.intercept)
+    
+    plt.show()
+    
+    print("Flatfield value = {}".format(flatfield_value))
         
 if __name__ == "__main__":
     parser = ConfigParser()
@@ -81,5 +118,6 @@ if __name__ == "__main__":
     input_folder = config['Paths']['obj_folder']
     
     #reconstruct(input_folder)
-    segment(input_folder)
-    check_intensity(input_folder)
+    #segment(input_folder)
+    #check_intensity(input_folder)
+    extract_noise_properties(input_folder)

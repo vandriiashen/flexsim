@@ -57,6 +57,8 @@ class Projector(object):
         self.det_x = width
         self.detector_pixel = self.geom.parameters['det_pixel']
         self.obj.voxel_size = self.geom.parameters['img_pixel']
+        #print("Detector pixel - {}".format(self.detector_pixel))
+        #print("Object voxel - {}".format(self.obj.voxel_size))
         
     def transform_main_geometry(self, zoom_vector):
         self.vol_geom = self.geom.astra_volume_geom(self.obj.size)
@@ -104,7 +106,6 @@ class Projector(object):
     
     def mono_fp(self):
         ff = self.noise.create_flatfield_image()
-        
         att_proj = np.zeros_like(ff, dtype = float)
         for i in range(1, self.mat.mat_count+1):
             mat_attenuation = self.mat.get_monochromatic_intensity(i)
@@ -142,7 +143,6 @@ class Projector(object):
         (folder / "Log").mkdir(exist_ok=True)
         if self.save_noiseless_flag:
             (folder / "Noiseless").mkdir(exist_ok=True)
-        
         ff = self.noise.create_flatfield_image()
         proj = self.fp(voltage)
         
@@ -150,7 +150,6 @@ class Projector(object):
             log_noiseless = -np.log(np.divide(proj, ff))
             for i in range(self.num_angles):
                 imageio.imsave(folder / 'Noiseless' / '{:06d}.tiff'.format(start_num+i), log_noiseless[:,i,:].astype(np.float32))
-        
         if self.noise_flag:
             proj = self.noise.add_noise(proj)
         log = -np.log(np.divide(proj, ff))
