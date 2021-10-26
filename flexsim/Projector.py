@@ -52,46 +52,13 @@ class Projector(object):
         proj_shape = (height, self.num_angles + 1, width)
         self.vol_geom = self.geom.astra_volume_geom(obj_shape)
         self.proj_geom = self.geom.astra_projection_geom(proj_shape)
-        
+                
         self.det_y = height
         self.det_x = width
         self.detector_pixel = self.geom.parameters['det_pixel']
         self.obj.voxel_size = self.geom.parameters['img_pixel']
         #print("Detector pixel - {}".format(self.detector_pixel))
         #print("Object voxel - {}".format(self.obj.voxel_size))
-        
-    def transform_main_geometry(self, zoom_vector):
-        self.vol_geom = self.geom.astra_volume_geom(self.obj.size)
-        
-        self.vol_geom['option']['WindowMinX'] *= zoom_vector[0]
-        self.vol_geom['option']['WindowMaxX'] *= zoom_vector[0]
-        self.vol_geom['option']['WindowMinY'] *= zoom_vector[1]
-        self.vol_geom['option']['WindowMaxY'] *= zoom_vector[1]
-        self.vol_geom['option']['WindowMinZ'] *= zoom_vector[2]
-        self.vol_geom['option']['WindowMaxZ'] *= zoom_vector[2]
-        
-    def transform_foreign_geometry(self, zoom_factor, translation_vector):
-        self.foreign_vol_geom = self.geom.astra_volume_geom(self.obj.size)
-        or_voxel = self.obj.voxel_size
-        tg_voxel = or_voxel * zoom_factor
-        com = np.array(ndimage.center_of_mass(self.obj.foreign_object))
-        for i in range(3):
-            com[i] -= 0.5 * self.obj.foreign_object.shape[i]
-        x_shift = com[2] * self.obj.voxel_size * (1 - zoom_factor) + translation_vector[0] * self.obj.voxel_size
-        y_shift = com[1] * self.obj.voxel_size * (1 - zoom_factor) + translation_vector[1] * self.obj.voxel_size
-        z_shift = com[0] * self.obj.voxel_size * (1 - zoom_factor) + translation_vector[2] * self.obj.voxel_size
-        self.foreign_vol_geom['option']['WindowMinX'] *= zoom_factor
-        self.foreign_vol_geom['option']['WindowMinX'] += x_shift
-        self.foreign_vol_geom['option']['WindowMaxX'] *= zoom_factor
-        self.foreign_vol_geom['option']['WindowMaxX'] += x_shift
-        self.foreign_vol_geom['option']['WindowMinY'] *= zoom_factor
-        self.foreign_vol_geom['option']['WindowMinY'] += y_shift
-        self.foreign_vol_geom['option']['WindowMaxY'] *= zoom_factor
-        self.foreign_vol_geom['option']['WindowMaxY'] += y_shift
-        self.foreign_vol_geom['option']['WindowMinZ'] *= zoom_factor
-        self.foreign_vol_geom['option']['WindowMinZ'] += z_shift
-        self.foreign_vol_geom['option']['WindowMaxZ'] *= zoom_factor
-        self.foreign_vol_geom['option']['WindowMaxZ'] += z_shift
     
     def project_material(self, mat_num):
         material_volume = np.zeros(self.obj.size, dtype = float)
@@ -160,6 +127,27 @@ class Projector(object):
             
         astra.data3d.clear()
         return log
+    
+    def create_material_map(self, start_num, folder):
+        ''' Creates multi-channel material map of the projection (every channel corresponds to the amount of the respective material along the trajectory).
+        
+        :param start_num: Starting index for writing images
+        :type start_num: :class:`int`
+        :param folder: Root folder for the data. Maps will be written in GT/ subfolder.
+        :type folder: :class:`pathlib.Path`
+        
+        '''
+        (folder / "GT").mkdir(exist_ok=True)
+        folder = folder / "GT"
+        
+        mat_num = self.mat.mat_count
+        depth_map = np.zeros((mat_num, self.obj.size[0], self.num_angles, self.obj.size[2]))
+        for i in range(0, mat_num):
+            mat_proj = self.project_material(i+1)
+            depth_map[i,:] = mat_proj
+        
+        for i in range(self.num_angles):
+            imageio.mimwrite(folder / '{:06d}.tiff'.format(start_num+i), depth_map[:,:,i,:].astype(np.float32))
             
     def create_gt(self, start_num, folder):
         (folder / "GT").mkdir(exist_ok=True)
@@ -171,7 +159,7 @@ class Projector(object):
             gt[mat_proj > 0.] = i
         
         for i in range(self.num_angles):
-            imageio.imsave(folder / '{:06d}.tiff'.format(start_num+i), gt[:,i,:].astype(np.int32))
+            imageio.imsave(folder / '{:06d}.tiff'.format(start_num+i), gt[:,i,:].astype(np.uint8))
             
     def create_reconstruction(self, log, start_num, folder, voltage):
         folder = folder / "{}".format(voltage)

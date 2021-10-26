@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import imageio
 from pathlib import Path
 import cupyx.scipy.ndimage
+import scipy.ndimage
+from tqdm import tqdm
 
 from flexsim import utils
 
@@ -104,6 +106,50 @@ class ObjectCreator(object):
 
         return vol_cpu
     
+    def create_spherical_pocket(self, mat_num, centre, radius):
+        Z, Y, X = np.ogrid[:self.size[0], :self.size[1], :self.size[2]]
+        Z -= centre[0]
+        Y -= centre[1]
+        X -= centre[2]
+        dist = np.sqrt(X**2 + Y**2 + Z**2)
+        
+        mask = dist < radius
+        mask = np.logical_and(mask, self.volume == 2)
+        print("Sphere done")
+        self.volume[mask] = mat_num
+        
+    def create_plane_pocket(self, mat_num, z_lim, start_point, step_size, direction_vector):
+        mask = np.zeros_like(self.volume, dtype=bool)
+        direction_vector /= np.power(direction_vector, 2).sum()
+        
+        cur_point = start_point
+        for i in range(40 * 10 // step_size):
+            rand_step = np.random.normal(0.,2.0)
+            rand_step -= 2*np.abs(i-20) // 5
+            rand_step = int(step_size + rand_step)
+            mask[z_lim[0]:z_lim[1],
+                 cur_point[1]-rand_step:cur_point[1]+rand_step,
+                 cur_point[0]-rand_step:cur_point[0]+rand_step] = True
+            
+            rand_incr = np.random.normal(0.,3.0, size=(2))
+            point_incr = (step_size * direction_vector + rand_incr).astype(int)
+            cur_point += point_incr
+        
+        mask = np.logical_and(mask, self.volume == 2)
+        print("Plane done")
+        self.volume[mask] = mat_num
+        
+    
+    def replace_material(self, src_num, dest_num):
+        '''Changes material in voxels from source to dest.
+        
+        :param src_num: ID of material that should be removed
+        :type src_num: :class:`i`
+        :param dest_num: ID of material that should be used instead
+        :type dest_num: :class:`i`
+        '''
+        self.volume[self.volume == src_num] = dest_num
+        
     def set_flexray_volume(self, obj_folder):
         '''Initializes object volume by reading it from the folder
         

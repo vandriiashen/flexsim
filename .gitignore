@@ -1,4 +1,5 @@
 flexsim/__pycache__/*
+flexsim.egg-info/*
 scripts/*.ini
 Data/*
 doc/_build/*
