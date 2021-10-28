@@ -9,14 +9,61 @@ from flexcalc import process
 from flexcalc import analyze
 import scipy.ndimage
 import scipy.stats
+import scipy.optimize
 import cupy
 import cupyx.scipy.ndimage
+import skimage
 import skimage.segmentation
 import skimage.morphology
 import skimage.filters
+import skimage.measure
+import skimage.transform
 import skimage.util
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from tqdm import tqdm
+
+def sphere_fitfunc(p, coords):
+    z0, y0, x0, R = p
+    z, y, x = coords.T
+    return np.sqrt((x-x0)**2 + (y-y0)**2 + (z-z0)**2)
+
+def get_bounding_box(mask):
+    z = np.any(mask, axis=(1, 2))
+    y = np.any(mask, axis=(0, 2))
+    x = np.any(mask, axis=(0, 1))
+    
+    zmin, zmax = np.where(z)[0][[0,-1]]
+    ymin, ymax = np.where(y)[0][[0,-1]]
+    xmin, xmax = np.where(x)[0][[0,-1]]
+    
+    return (zmin, zmax, ymin, ymax, xmin, xmax)
+
+def show3(title, vol) :
+    shape = vol.shape
+
+    midZ = (int)(shape[0]/2.)
+    midY = (int)(shape[1]/2.)
+    midX = (int)(shape[2]/2.)
+
+    fig, axes = plt.subplots(1, 3)
+    ax = axes.ravel()
+    fig.suptitle(title, fontsize=16)
+
+    ax[0].set_title("YZ")
+    ax[0].imshow(vol[:,:,midX], cmap=cm.gray)
+
+    ax[1].set_title("XZ")
+    ax[1].imshow(vol[:,midY,:], cmap=cm.gray)
+
+    ax[2].set_title("XY")
+    ax[2].imshow(vol[midZ,:,:], cmap=cm.gray)
+
+    plt.tight_layout()
+    plt.savefig("{}.png".format(title))
+    
+def invert_volume(vol):
+    return (~(vol.astype(bool))).astype(vol.dtype)
 
 def apply_median_filter(vol, size):
     ''' Applies median filter to the volume using GPU acceleration (`cupyx.scipy.ndimage.median_filter`).
@@ -61,8 +108,8 @@ def reconstruct(input_folder, bh_correction):
     
     data.write_stack(save_path, 'slice', vol, dim = 0)
     
-def segment(input_folder):
-    '''Segments every slice with thresholding. Segmented slices will be written to segm/ subfolder.
+def segment(input_folder, verbose = True):
+    '''Dual-space analysis by Robert van Liere.
     '''
     path = Path(input_folder)
     recon_path = path / "recon_bh"
@@ -76,37 +123,111 @@ def segment(input_folder):
     segm_vol = np.zeros_like(vol, dtype=np.uint8)
     for i in range(height):
         vol[i,:] = imageio.imread(recon_path / "slice_{:06d}.tiff".format(i))
+    vol = skimage.img_as_ubyte(vol)
+        
+    thr_holder = skimage.filters.threshold_otsu(vol)
+    vol = ((skimage.morphology.binary_opening(vol > thr_holder, np.ones((5,5,5), np.uint8)).astype(np.uint8))) * vol
+    if verbose:
+        print("Holder removed")
+        show3("without_holder", vol)
+        
+    peel0 = skimage.morphology.binary_dilation(skimage.morphology.binary_dilation(vol>0)) * invert_volume(vol)
+    labels, nfeatures = scipy.ndimage.label(peel0)
+    props = skimage.measure.regionprops(labels)
+    if verbose:
+        print ("Peel: nfeatures", nfeatures, 'props', len(props))
+    propL = []
+    for prop in props:
+        propL.append ((prop.area, prop))
+    propL = sorted (propL, key=lambda r:r[0], reverse=True)
+    area, prop = propL[0]
+    peel = (labels == prop.label).astype(np.int8)
+    if verbose:
+        print("Peel segmented")
+        show3("peel", peel)
     
-    vol[:,100:700,200:850] = apply_median_filter(vol[:,100:700,200:850], 8)
-    print("Meat/Background segmentation")
-    thr_avocado = skimage.filters.threshold_otsu(vol)
-    print("Avocado meat threshold = {}".format(thr_avocado))
-    obj = (vol > thr_avocado).astype(np.uint8)
+    meatpit = vol * invert_volume (peel)
+    meatpit = apply_median_filter(meatpit, 3)
+    thr_meatpit = skimage.filters.threshold_multiotsu(vol)
+    labels, nfeatures = scipy.ndimage.label((meatpit>thr_meatpit[-1]).astype(np.uint8))
+    props = skimage.measure.regionprops(labels)
+    if verbose:
+        print ('Pit: nfeatures0', nfeatures, 'props', len(props))
+    propL = []
+    for prop in props:
+        propL.append ((prop.area, prop))
+    propL = sorted (propL, key=lambda r:r[0], reverse=True)
+    area, prop = propL[0]
+    pit = (labels == prop.label).astype(np.int8)
+    num_erosion = 3
+    num_dilation = 3
+    for i in range(num_erosion):
+        pit = skimage.morphology.binary_erosion(pit)
+    for i in range(num_dilation):
+        pit = skimage.morphology.binary_dilation(pit)
+    if verbose:
+        print("Pit segmented")
+        show3("pit", pit)
+        
+    pit_boundary = skimage.segmentation.find_boundaries(pit)
+    pit_boundary_points = np.nonzero(pit_boundary)
+    point_coords = np.zeros((pit_boundary_points[0].shape[0], 3))
+    for i in range(3):
+        point_coords[:,i] = pit_boundary_points[i]
+    error_func = lambda p, x: sphere_fitfunc(p, x) - p[3]
+    p0 = np.array([0.,0.,0.,1.])
+    print(point_coords.shape)
+    p1, cost = scipy.optimize.leastsq(error_func, p0, args=(point_coords,))
+    margin = 1.05
+    p1[3] *= margin
+    sphere_mask = np.zeros_like(pit, dtype=bool)
+    sphere_mask[int(p1[0]-p1[3]):int(p1[0]+p1[3]),
+                int(p1[1]-p1[3]):int(p1[1]+p1[3]),
+                int(p1[2]-p1[3]):int(p1[2]+p1[3])] = True
+    pit[~sphere_mask] = 0
+    if verbose:
+        print("Pit sphere fit:")
+        print(p1)
+        show3("pit_sphere", pit)
+        
+    meatpit = (meatpit>thr_meatpit[0]).astype(np.uint8)
+    meat = meatpit - pit
+    if verbose:
+        print("Meat segmented")
+        show3("meat", meat)
     
-    print("Dual space segmentation")
-    boundary = skimage.segmentation.find_boundaries(obj).astype(np.uint8)
-    background = skimage.segmentation.flood_fill(boundary, (1, 1, 1), 1, connectivity=1)
-    air_gaps =  skimage.util.invert((background+obj)>0).astype(np.uint8)
+    zmin, zmax, ymin, ymax, xmin, xmax = get_bounding_box(peel)
+    peel_subvolume = peel[zmin:zmax, ymin:ymax, xmin:xmax]
+    shape_before_downscale = peel_subvolume.shape
+    peel_subvolume = skimage.transform.downscale_local_mean(peel_subvolume, (4,4,4))
+    peel_subvolume = (peel_subvolume>0).astype(np.uint8)
+    if verbose:
+        print("Convex hull of peel: ", zmin, zmax, ymin, ymax, xmin, xmax)
+        print("Volume size reduction factor = ", float(peel_subvolume.size) / peel.size)
+    peel_subvolume_convex = skimage.morphology.convex_hull.convex_hull_image(peel_subvolume)
+    peel_subvolume_convex = skimage.transform.resize(peel_subvolume, shape_before_downscale)
+    peel_subvolume_convex = (peel_subvolume_convex>0).astype(np.uint8)
+    peel_convex = np.zeros_like(peel, dtype=np.uint8)
+    peel_convex[zmin:zmax, ymin:ymax, xmin:xmax] = peel_subvolume_convex
+    if verbose:
+        print("Peel convex hull constructed")
+        show3("peel_convex", peel_convex)
     
-    print("Seed segmentation")
-    thr_seed = 0.4
-    seed_mask = (vol > thr_seed).astype(np.uint8)
-    print("Avocado meat threshold = {}".format(thr_seed))
-    erosion_num = 3
-    dilation_num = 4
-    for i in range(erosion_num):
-        seed_mask = skimage.morphology.erosion(seed_mask)
-    for i in range(dilation_num):
-        seed_mask = skimage.morphology.dilation(seed_mask)
+    background = skimage.segmentation.flood_fill(peel_convex, (1, 1, 1), 1, connectivity=1)
+    air_gaps = skimage.util.invert((background+meatpit+peel)>0).astype(np.uint8)
+    air_gaps = skimage.morphology.binary_dilation(skimage.morphology.binary_erosion(air_gaps))
+    if verbose:
+        print("Air gaps segmented")
+        show3("air_gaps", air_gaps)
     
-    # avocado meat
-    segm_vol[obj == 1] = 2
-    # avocado peel
-    segm_vol[boundary == 1] = 1
-    # avocado seed
-    segm_vol[seed_mask == 1] = 3
-    # air gaps
+    segm_vol[peel == 1] = 1
+    segm_vol[meat == 1] = 2
+    segm_vol[pit == 1] = 3
     segm_vol[air_gaps == 1] = 4
+    
+    if verbose:
+        print("Segmentation is complete")
+        show3("segm", segm_vol)
     
     for i in range(height):
         imageio.imwrite(segm_path / "slice_{:06d}.tiff".format(i), segm_vol[i,:])
@@ -194,7 +315,13 @@ if __name__ == "__main__":
     config = {s:dict(parser.items(s)) for s in parser.sections()}
     input_folder = config['Paths']['obj_folder']
     
-    #preprocess_proj(input_folder, 16)
-    reconstruct(input_folder, True)
-    segment(input_folder)
-    #check_intensity(input_folder)
+    mode = "Segment"
+    
+    if mode == "Preprocess projections":
+        preprocess_proj(input_folder, 16)
+    if mode == "Segment":
+        #reconstruct(input_folder, True)
+        segment(input_folder)
+    if mode == "Evaluate intensity":
+        reconstruct(input_folder, False)
+        check_intensity(input_folder)

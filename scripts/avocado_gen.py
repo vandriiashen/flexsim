@@ -53,7 +53,7 @@ def avocado_augment(config_fname):
     mat = flexsim.MaterialHandler(energy_bins, config['Materials'])
     noise = flexsim.NoiseModel(proj_shape, config['Noise'])
     
-    for j in tqdm(range(0,5)):
+    for j in tqdm(range(0,1)):
         obj = flexsim.ObjectCreator(obj_shape, mat)
         obj.set_flexray_volume(obj_vol_folder)
         # Replace existing air gaps by avocado meat
@@ -115,5 +115,5 @@ if __name__ == "__main__":
     config_fname = "avocado.ini"
     np.random.seed(seed = 42)
     
-    avocado_gt_gen(config_fname)
-    #avocado_augment(config_fname)
+    #avocado_gt_gen(config_fname)
+    avocado_augment(config_fname)
