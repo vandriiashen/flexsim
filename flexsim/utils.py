@@ -89,3 +89,29 @@ def apply_median_filter(vol):
     pinned_mempool.free_all_blocks()
         
     return vol_cpu
+
+def generate_affine_matrix(zoom, a, b, c, dist):
+    zoom_mat = np.array([[zoom, 0, 0], [0, zoom, 0], [0, 0, zoom]])
+    a_mat = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
+    b_mat = np.array([[np.cos(b), 0, np.sin(b)], [0, 1, 0], [-np.sin(b), 0, np.cos(b)]])
+    c_mat = np.array([[1, 0, 0], [0, np.cos(c), -np.sin(c)], [0, np.sin(c), np.cos(c)]])
+    
+    dist_mat = np.zeros((3,3))
+    main_el = np.random.uniform(1-dist, 1+dist, size=(3,))
+    off_el = np.random.uniform(-dist, dist, size=(6,))
+    dist_mat[0,0] = main_el[0]
+    dist_mat[1,1] = main_el[1]
+    dist_mat[2,2] = main_el[2]
+    dist_mat[0,1] = off_el[0]
+    dist_mat[0,2] = off_el[1]
+    dist_mat[1,2] = off_el[2]
+    dist_mat[1,0] = off_el[3]
+    dist_mat[2,0] = off_el[4]
+    dist_mat[2,1] = off_el[5]
+    
+    res = np.matmul(zoom_mat, a_mat)
+    res = np.matmul(res, b_mat)
+    res = np.matmul(res, c_mat)
+    res = np.matmul(res, dist_mat)
+    
+    return res

@@ -5,7 +5,11 @@ import imageio
 from pathlib import Path
 import cupyx.scipy.ndimage
 import scipy.ndimage
+import skimage.measure
+import skimage.morphology
+from voltools import transform
 from tqdm import tqdm
+import time
 
 from flexsim import utils
 
@@ -26,87 +30,52 @@ class ObjectCreator(object):
         self.voxel_size = 0.114723907 # in mm, account for this later
         self.mat = matHandler
     
-    def shift_volume(self, vol, shift):
-        ''' Shifts the object's volume using GPU acceleration (`cupyx.scipy.ndimage.shift`).
-        
-        :param vol: Array containing the object's model
-        :type vol: :class:`np.ndarray`
-        :param shift: Shift along the axes.
-        :type shift: :class:`float` or :class:`list`
-        :return: Shifted volume
-        :rtype: :class:`np.ndarray`
-        
-        '''
-        vol_gpu = cupy.asarray(vol)
-        vol_gpu = cupyx.scipy.ndimage.shift(vol_gpu, shift)
-        vol_cpu = vol_gpu.get()
-        
-        mempool = cupy.get_default_memory_pool()
-        pinned_mempool = cupy.get_default_pinned_memory_pool()
-        mempool.free_all_blocks()
-        pinned_mempool.free_all_blocks()
-        
-        return vol_cpu
-    
-    def zoom_volume(self, vol, zoom):
-        ''' Zooms the object's volume using GPU acceleration (`cupyx.scipy.ndimage.zoom`). The same shape is maintained in the output array.
-        
-        :param vol: Array containing the object's model
-        :type vol: :class:`np.ndarray`
-        :param zoom: Zoom along the axes.
-        :type zoom: :class:`float` or :class:`list`
-        :return: Zoomed volume
-        :rtype: :class:`np.ndarray`
-        
-        '''
-        old_s = vol.shape
-        vol_gpu = cupy.asarray(vol)
-        vol_gpu = cupyx.scipy.ndimage.zoom(vol_gpu, zoom)
-        vol_cpu = vol_gpu.get()
-        new_s = vol_cpu.shape
-        
-        pad = [[0, 0], [0, 0], [0, 0]]
-        select = [[0, new_s[0]], [0, new_s[1]], [0, new_s[2]]]
-        for i in range(3):
-            if new_s[i] < old_s[i]:
-                pad[i] = [(old_s[i]-new_s[i]) // 2, old_s[i]-new_s[i] - (old_s[i]-new_s[i]) // 2]
-            if new_s[i] > old_s[i]:
-                select[i] = [(new_s[i]-old_s[i]) // 2, old_s[i] + (new_s[i]-old_s[i]) // 2]
+    def affine_volume(self, scale, shear, rotation, translation, verbose=False):
+        '''Performs affine transformation of the object's volume
                 
-        res = vol_cpu[select[0][0]:select[0][1] , select[1][0]:select[1][1] , select[2][0]:select[2][1]]
-        res = np.pad(res, pad)
+        '''
+        if verbose == True:
+            start_time = time.time()
+            
+        res_vol = np.zeros_like(self.volume, dtype=int)
 
-        mempool = cupy.get_default_memory_pool()
-        pinned_mempool = cupy.get_default_pinned_memory_pool()
-        mempool.free_all_blocks()
-        pinned_mempool.free_all_blocks()
-
-        return res
+        for i in range(1, self.mat.mat_count+1):
+            tmp_vol = np.zeros_like(self.volume, dtype=bool)
+            tmp_vol[self.volume == i] = True
+            transformed_vol = transform(tmp_vol, interpolation='linear', device='cpu', scale=scale, shear=shear, translation=translation, rotation=rotation, rotation_units='deg', rotation_order='rzxz')
+            transformed_vol = transformed_vol.astype(bool)
+            transformed_vol = skimage.morphology.binary_dilation(transformed_vol)
+            res_vol[transformed_vol] = i
+            
+        self.volume = res_vol
+                            
+        if verbose == True:
+            end_time = time.time() - start_time
+            print("Affine transform time = {:.2f}s".format(end_time))
     
-    def affine_volume(self, vol, matrix):
-        '''Performs affine transformation of the object's volume using GPU acceleration (`cupyx.scipy.ndimage.affine_transform`).
-        
-        :param vol: Array containing the object's model
-        :type vol: :class:`np.ndarray`
-        :param matrix: Matrix of the affine transformation
-        :type matrix: :class:`np.ndarray`
-        :return: Transformed volume
-        :rtype: :class:`np.ndarray`
+    def affine_material(self, replace_num, fill_num, scale, shear, rotation, translation, verbose=False):
+        '''Performs affine transformation of the material
         
         '''
-        vol_gpu = cupy.asarray(vol)
-        mat_gpu = cupy.asarray(matrix)
-        vol_gpu = cupyx.scipy.ndimage.affine_transform(vol_gpu, mat_gpu, output_shape=vol.shape)
-        vol_cpu = vol_gpu.get()
+        if verbose == True:
+            start_time = time.time()
         
-        mempool = cupy.get_default_memory_pool()
-        pinned_mempool = cupy.get_default_pinned_memory_pool()
-        mempool.free_all_blocks()
-        pinned_mempool.free_all_blocks()
-
-        return vol_cpu
+        tmp_vol = np.zeros_like(self.volume, dtype=bool)
+        
+        tmp_vol[self.volume == replace_num] = True
+        self.volume[self.volume == replace_num] = fill_num
+        
+        transformed_vol = transform(tmp_vol, interpolation='linear', device='cpu', scale=scale, shear=shear, translation=translation, rotation=rotation, rotation_units='deg', rotation_order='rzxz')
+        transformed_vol = transformed_vol.astype(bool)
+        transformed_vol = skimage.morphology.binary_dilation(transformed_vol)
+        
+        self.volume[transformed_vol] = replace_num
+                
+        if verbose == True:
+            end_time = time.time() - start_time
+            print("Affine transform time = {:.2f}s".format(end_time))
     
-    def create_spherical_pocket(self, mat_num, centre, radius):
+    def create_spherical_pocket(self, mat_num, centre, radius, dilation_num):
         Z, Y, X = np.ogrid[:self.size[0], :self.size[1], :self.size[2]]
         Z -= centre[0]
         Y -= centre[1]
@@ -116,6 +85,7 @@ class ObjectCreator(object):
         mask = dist < radius
         mask = np.logical_and(mask, self.volume == 2)
         print("Sphere done")
+        
         self.volume[mask] = mat_num
         
     def create_plane_pocket(self, mat_num, z_lim, start_point, step_size, direction_vector):
@@ -144,11 +114,69 @@ class ObjectCreator(object):
         '''Changes material in voxels from source to dest.
         
         :param src_num: ID of material that should be removed
-        :type src_num: :class:`i`
+        :type src_num: :class:`int`
         :param dest_num: ID of material that should be used instead
-        :type dest_num: :class:`i`
+        :type dest_num: :class:`int`
         '''
         self.volume[self.volume == src_num] = dest_num
+        
+    def remove_material_clusters(self, src_num, dest_num, num_keep):
+        '''Compute clusters of voxels filled with a certain material.
+        '''
+        labels, nfeatures = scipy.ndimage.label(self.volume == src_num)
+        props = skimage.measure.regionprops(labels)
+        self.replace_material(src_num, dest_num)
+        
+        propL = []
+        for prop in props:
+            propL.append ((prop.area, prop))
+        propL = sorted (propL, key=lambda r:r[0], reverse=True)
+        
+        for i in range(min(num_keep, len(propL))):
+            area, prop = propL[i]
+            self.volume[labels == prop.label] = src_num
+            
+    def remove_points_random(self, src_num, dest_num, remove_fraction, verbose=True):
+        '''...
+        '''
+        points = np.nonzero(self.volume == src_num)
+        points_num = points[0].shape[0]
+        coords = np.zeros((points_num, 3), dtype=np.int32)
+        for i in range(3):
+            coords[:,i] = points[i]
+        
+        seq = np.arange(points_num)
+        np.random.shuffle(seq)
+        
+        for i in range(int(remove_fraction*points_num)):
+            point_coords = coords[seq[i],:]
+            self.volume[point_coords[0], point_coords[1], point_coords[2]] = dest_num
+            
+    def split_clusters(self, src_num, dest_num, num_classes, num_drop_classes, verbose=True):
+        '''
+        '''
+        points = np.nonzero(self.volume == src_num)
+        points_num = points[0].shape[0]
+        coords = np.zeros((points_num, 3), dtype=np.int32)
+        for i in range(3):
+            coords[:,i] = points[i]
+        
+        seq = np.arange(points_num)
+        np.random.shuffle(seq)
+        
+        dist_map = np.zeros((points_num, num_classes), dtype=np.float32)
+        for i in range(num_classes):
+            dist_map[:,i] = np.power(np.subtract(coords, coords[seq[i],:]), 2).sum(axis=1)
+        class_map = np.argmin(dist_map, axis=1)
+        if verbose:
+            print(dist_map[:10,:])
+            print(class_map[:10])
+            for i in range(num_classes):
+                print(np.count_nonzero(class_map == i))
+                    
+        for i in range(num_drop_classes):
+            select = coords[class_map==i,:]
+            self.volume[select[:,0], select[:,1], select[:,2]] = dest_num
         
     def set_flexray_volume(self, obj_folder):
         '''Initializes object volume by reading it from the folder

@@ -10,6 +10,7 @@ from flexcalc import analyze
 import scipy.ndimage
 import scipy.stats
 import scipy.optimize
+import scipy.signal
 import cupy
 import cupyx.scipy.ndimage
 import skimage
@@ -123,6 +124,8 @@ def segment(input_folder, verbose = True):
     segm_vol = np.zeros_like(vol, dtype=np.uint8)
     for i in range(height):
         vol[i,:] = imageio.imread(recon_path / "slice_{:06d}.tiff".format(i))
+    # A small number of outliers is present in one sample
+    vol[vol>1.] = 1.
     vol = skimage.img_as_ubyte(vol)
         
     thr_holder = skimage.filters.threshold_otsu(vol)
@@ -168,28 +171,7 @@ def segment(input_folder, verbose = True):
     if verbose:
         print("Pit segmented")
         show3("pit", pit)
-        
-    pit_boundary = skimage.segmentation.find_boundaries(pit)
-    pit_boundary_points = np.nonzero(pit_boundary)
-    point_coords = np.zeros((pit_boundary_points[0].shape[0], 3))
-    for i in range(3):
-        point_coords[:,i] = pit_boundary_points[i]
-    error_func = lambda p, x: sphere_fitfunc(p, x) - p[3]
-    p0 = np.array([0.,0.,0.,1.])
-    print(point_coords.shape)
-    p1, cost = scipy.optimize.leastsq(error_func, p0, args=(point_coords,))
-    margin = 1.05
-    p1[3] *= margin
-    sphere_mask = np.zeros_like(pit, dtype=bool)
-    sphere_mask[int(p1[0]-p1[3]):int(p1[0]+p1[3]),
-                int(p1[1]-p1[3]):int(p1[1]+p1[3]),
-                int(p1[2]-p1[3]):int(p1[2]+p1[3])] = True
-    pit[~sphere_mask] = 0
-    if verbose:
-        print("Pit sphere fit:")
-        print(p1)
-        show3("pit_sphere", pit)
-        
+
     meatpit = (meatpit>thr_meatpit[0]).astype(np.uint8)
     meat = meatpit - pit
     if verbose:
@@ -231,6 +213,27 @@ def segment(input_folder, verbose = True):
     
     for i in range(height):
         imageio.imwrite(segm_path / "slice_{:06d}.tiff".format(i), segm_vol[i,:])
+        
+def count_materials(input_folder):
+    '''Computes the number of voxels filled with different materials
+    '''
+    path = Path(input_folder)
+    segm_path = path / "segm"
+    
+    height = len(list(segm_path.glob("*.tiff")))
+    im_shape = (imageio.imread(segm_path / "slice_{:06d}.tiff".format(0))).shape
+    segm = np.zeros((height, *im_shape), dtype=np.int16)
+    for i in range(height):
+        segm[i,:] = imageio.imread(segm_path / "slice_{:06d}.tiff".format(i))
+        
+    peel_count = np.count_nonzero(segm == 1)
+    avocado_count = np.count_nonzero(segm == 2)
+    seed_count = np.count_nonzero(segm == 3)
+    air_count = np.count_nonzero(segm == 4)
+    seed_com = scipy.ndimage.center_of_mass(segm == 3)
+    
+    print("Peel,Avocado,Seed,Air,Seed_COM")
+    print("{},{},{},{},{:.2f},{:.2f},{:.2f}".format(peel_count, avocado_count, seed_count, air_count, *seed_com))
         
 def check_intensity(input_folder):
     '''Computes mean value and standard deviations for materials based on the segmentation.
@@ -313,15 +316,21 @@ if __name__ == "__main__":
     parser = ConfigParser()
     parser.read("avocado.ini")
     config = {s:dict(parser.items(s)) for s in parser.sections()}
-    input_folder = config['Paths']['obj_folder']
+    input_folder_old = config['Paths']['obj_folder']
     
-    mode = "Segment"
+    mode = "Preprocess projections"
+    
+    folders = ['/export/scratch2/vladysla/Data/Real/AvocadoSet/s4_d7']
     
     if mode == "Preprocess projections":
-        preprocess_proj(input_folder, 16)
+        for input_folder in folders:
+            preprocess_proj(input_folder, 10)
     if mode == "Segment":
-        #reconstruct(input_folder, True)
-        segment(input_folder)
+        for input_folder in folders:
+            reconstruct(input_folder, True)
+            segment(input_folder)
+            print(input_folder)
+            count_materials(input_folder)
     if mode == "Evaluate intensity":
         reconstruct(input_folder, False)
-        check_intensity(input_folder)
+        #check_intensity(input_folder)
