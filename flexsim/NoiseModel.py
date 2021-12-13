@@ -51,6 +51,10 @@ class NoiseModel(object):
         
         '''
         g = self.poisson_scaling
+        
+        if g == 0.:
+            return proj
+        
         res = np.random.poisson(g * proj)
         res = res.astype(float) / g
         return res
@@ -64,6 +68,9 @@ class NoiseModel(object):
         :rtype: :class:`np.ndarray`
         
         '''
+        if self.gaussian_std == 0.:
+            return proj
+        
         proj += np.random.normal(0, self.gaussian_std, size=proj.shape)
         return proj
     
@@ -76,6 +83,9 @@ class NoiseModel(object):
         :rtype: :class:`np.ndarray`
         
         '''
+        if self.blur_width == 0.:
+            return proj
+        
         for i in range(proj.shape[1]):
             proj[:,i,:] = ndimage.gaussian_filter(proj[:,i,:], sigma = self.blur_width)
         return proj

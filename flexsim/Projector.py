@@ -42,9 +42,9 @@ class Projector(object):
         '''
         self.geom.parameters['src_ort'] += (7-5.5) #see below for flexbox hard coded values
         self.geom['det_roll'] -= 0.25
-        self.geom.parameters['ang_range'] = ang_range
         '''
         
+        self.geom.parameters['ang_range'] = ang_range
         obj_shape = self.obj.size
         width = obj_shape[2]
         height = obj_shape[0]

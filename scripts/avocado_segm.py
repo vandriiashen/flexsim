@@ -89,7 +89,7 @@ def reconstruct(input_folder, bh_correction):
         save_path = path / "recon_bh"
     else:
         save_path = path / "recon"
-    proj, geom = process.process_flex(path, sample = 2, skip = 1)
+    proj, geom = process.process_flex(path, sample = 4, skip = 1)
 
     save_path.mkdir(exist_ok=True)
 
@@ -181,7 +181,7 @@ def segment(input_folder, verbose = True):
     zmin, zmax, ymin, ymax, xmin, xmax = get_bounding_box(peel)
     peel_subvolume = peel[zmin:zmax, ymin:ymax, xmin:xmax]
     shape_before_downscale = peel_subvolume.shape
-    peel_subvolume = skimage.transform.downscale_local_mean(peel_subvolume, (4,4,4))
+    peel_subvolume = skimage.transform.downscale_local_mean(peel_subvolume, (2,2,2))
     peel_subvolume = (peel_subvolume>0).astype(np.uint8)
     if verbose:
         print("Convex hull of peel: ", zmin, zmax, ymin, ymax, xmin, xmax)
@@ -271,7 +271,7 @@ def preprocess_proj(input_folder, skip_proj):
     log_path = path / "log"
     log_path.mkdir(exist_ok=True)
     
-    proj, flat, dark, geom = data.read_flexray(path, sample = 2, skip = 1)
+    proj, flat, dark, geom = data.read_flexray(path, sample = 4, skip = 1)
     proj = process.preprocess(proj, flat, dark)
     proj = np.flip(proj, 0)
     
@@ -316,21 +316,18 @@ if __name__ == "__main__":
     parser = ConfigParser()
     parser.read("avocado.ini")
     config = {s:dict(parser.items(s)) for s in parser.sections()}
-    input_folder_old = config['Paths']['obj_folder']
+    input_folder = config['Paths']['obj_folder']
     
     mode = "Preprocess projections"
-    
-    folders = ['/export/scratch2/vladysla/Data/Real/AvocadoSet/s4_d7']
-    
+        
     if mode == "Preprocess projections":
-        for input_folder in folders:
-            preprocess_proj(input_folder, 10)
+        preprocess_proj(input_folder, 40)
+        print(input_folder)
     if mode == "Segment":
-        for input_folder in folders:
-            reconstruct(input_folder, True)
-            segment(input_folder)
-            print(input_folder)
-            count_materials(input_folder)
+        reconstruct(input_folder, True)
+        segment(input_folder)
+        print(input_folder)
+        count_materials(input_folder)
     if mode == "Evaluate intensity":
         reconstruct(input_folder, False)
-        #check_intensity(input_folder)
+        check_intensity(input_folder)

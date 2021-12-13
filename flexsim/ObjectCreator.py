@@ -74,42 +74,71 @@ class ObjectCreator(object):
         if verbose == True:
             end_time = time.time() - start_time
             print("Affine transform time = {:.2f}s".format(end_time))
+            
+    def check_material_inside(self, inner_mat, outer_mat):
+        '''Checks if material is inside of another material
+        '''
+        
+        inner_vol = self.volume == inner_mat
+        outer_vol = np.copy(self.volume == outer_mat)
+        shape_before_downscale = outer_vol.shape
+        outer_downsampled = skimage.transform.downscale_local_mean(outer_vol, (4,4,4))
+        outer_downsampled_convex = skimage.morphology.convex_hull.convex_hull_image(outer_downsampled)
+        outer_convex = skimage.transform.resize(outer_downsampled_convex, shape_before_downscale)
+        outer_convex = (outer_convex>0).astype(bool)
+        
+        outside_voxels = np.logical_and(inner_vol, ~outer_convex)
+        if np.count_nonzero(outside_voxels) > 0:
+            print(np.count_nonzero(outside_voxels))
+            print("Outside")
+            return False
+        
+        return True
     
-    def create_spherical_pocket(self, mat_num, centre, radius, dilation_num):
+    def create_sphere(self, replace_num, fill_num, centre, radius):
         Z, Y, X = np.ogrid[:self.size[0], :self.size[1], :self.size[2]]
         Z -= centre[0]
         Y -= centre[1]
         X -= centre[2]
-        dist = np.sqrt(X**2 + Y**2 + Z**2)
+        R = np.sqrt(X**2 + Y**2 + Z**2)
         
-        mask = dist < radius
-        mask = np.logical_and(mask, self.volume == 2)
-        print("Sphere done")
+        mask = R < radius
+        mask = np.logical_and(mask, self.volume == replace_num)
+        self.volume[mask] = fill_num
         
-        self.volume[mask] = mat_num
-        
-    def create_plane_pocket(self, mat_num, z_lim, start_point, step_size, direction_vector):
-        mask = np.zeros_like(self.volume, dtype=bool)
-        direction_vector /= np.power(direction_vector, 2).sum()
-        
-        cur_point = start_point
-        for i in range(40 * 10 // step_size):
-            rand_step = np.random.normal(0.,2.0)
-            rand_step -= 2*np.abs(i-20) // 5
-            rand_step = int(step_size + rand_step)
-            mask[z_lim[0]:z_lim[1],
-                 cur_point[1]-rand_step:cur_point[1]+rand_step,
-                 cur_point[0]-rand_step:cur_point[0]+rand_step] = True
+    def create_spherical_fragments(self, replace_num, fill_num, centre, radius, thickness, arc_start, num_fragments):
+        Z, Y, X = np.ogrid[:self.size[0], :self.size[1], :self.size[2]]
             
-            rand_incr = np.random.normal(0.,3.0, size=(2))
-            point_incr = (step_size * direction_vector + rand_incr).astype(int)
-            cur_point += point_incr
+        Z -= int(centre[0])
+        Y -= int(centre[1])
+        X -= int(centre[2])
+        R = np.sqrt(X**2 + Y**2 + Z**2)
+        theta = np.zeros_like(R)
+        theta = np.arccos(Z / R, where=R!=0)
+        phi = np.arctan2(Y, X)
+                
+        mask = self.volume==replace_num
+        fragment_mask = np.zeros_like(mask)
         
-        mask = np.logical_and(mask, self.volume == 2)
-        print("Plane done")
-        self.volume[mask] = mat_num
-        
-    
+        for i in range(num_fragments):
+            phi_start = np.random.uniform(phi.min(), phi.max())
+            phi_step = 0.1
+            phi_mask = np.logical_and(phi > phi_start, phi < phi_start + phi_step)
+            
+            theta_end = np.random.uniform(theta.min(), arc_start)
+            theta_start = np.random.uniform(theta.min(), theta_end)
+            theta_mask = np.logical_and(theta > theta_start, theta < theta_end)
+            
+            R_step = np.random.uniform(0.5*thickness, 1.5*thickness)
+            R_mask = np.logical_and(R > radius, R < radius + R_step)
+            
+            tmp_mask = np.logical_and(phi_mask, theta_mask)
+            tmp_mask = np.logical_and(tmp_mask, R_mask)
+            fragment_mask = np.logical_or(fragment_mask, tmp_mask)
+            
+        mask = np.logical_and(mask, fragment_mask)        
+        self.volume[mask] = fill_num
+            
     def replace_material(self, src_num, dest_num):
         '''Changes material in voxels from source to dest.
         
@@ -185,6 +214,19 @@ class ObjectCreator(object):
         :type obj_folder: :class:`pathlib.Path`
         '''
         self.volume = utils.read_volume(obj_folder)
+        
+    def save_stats(self, folder, start_num, proj_num):
+        '''Save the total count of voxels of every material. The numbers are the same for all projections of the same volume
+        '''
+        mat_counts = []
+        for i in range(1, self.mat.mat_count+1):
+            mat_counts.append(np.count_nonzero(self.volume == i))
+        
+        stat_line = ",".join(str(num) for num in mat_counts)
+        
+        with open(folder / "stats.csv", "a") as f:
+            for i in range(start_num, start_num+proj_num):
+                f.write("{},{}\n".format(i, stat_line))
     
     def save_volume(self, folder):
         (folder / "GT_Recon").mkdir(exist_ok=True)

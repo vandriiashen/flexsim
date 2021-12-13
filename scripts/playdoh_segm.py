@@ -57,7 +57,7 @@ def reconstruct(input_folder, bh_correction):
     
     data.write_stack(save_path, 'slice', vol, dim = 0)
     
-def segment(input_folder):
+def segment(input_folder, otsu_classes):
     '''Segments every slice with thresholding. Segmented slices will be written to segm/ subfolder.
     '''
     path = Path(input_folder)
@@ -77,14 +77,50 @@ def segment(input_folder):
     vol = skimage.img_as_ubyte(vol)
     vol = apply_median_filter(vol, 3)
     
-    thr = skimage.filters.threshold_multiotsu(vol, classes=3)
-    print("Playdoh/Stone thresholds: {:.2f} / {:.2f}".format(*thr))
+    thr = skimage.filters.threshold_multiotsu(vol, classes=otsu_classes)
     
-    segm_vol[vol > thr[0]] = 1
-    segm_vol[vol > thr[1]] = 2
-    
+    if otsu_classes == 3:
+        print("Playdoh/Stone thresholds: {:.2f} / {:.2f}".format(*thr))
+        segm_vol[vol > thr[0]] = 1
+        segm_vol[vol > thr[1]] = 2
+    if otsu_classes == 2:
+        print("Playdoh threshold: {:.2f}".format(thr[0]))
+        segm_vol[vol > thr[0]] = 1
+        
     for i in range(height):
         imageio.imwrite(segm_path / "slice_{:06d}.tiff".format(i), segm_vol[i,:])
+        
+def preprocess_proj(input_folder, skip_proj):
+    '''Applies darkfield- and flatfield-correction to projections and saves them to a separate folder.
+    '''
+    path = Path(input_folder)
+    log_path = path / "log"
+    log_path.mkdir(exist_ok=True)
+    
+    proj, flat, dark, geom = data.read_flexray(path, sample = 2, skip = 1)
+    proj = process.preprocess(proj, flat, dark)
+    proj = np.flip(proj, 0)
+    
+    for i in range(0,proj.shape[1],skip_proj):
+        imageio.imwrite(log_path / "scan_{:06d}.tiff".format(i), proj[:,i,:])
+        
+def count_materials(input_folder):
+    '''Computes the number of voxels filled with different materials
+    '''
+    path = Path(input_folder)
+    segm_path = path / "segm"
+    
+    height = len(list(segm_path.glob("*.tiff")))
+    im_shape = (imageio.imread(segm_path / "slice_{:06d}.tiff".format(0))).shape
+    segm = np.zeros((height, *im_shape), dtype=np.int16)
+    for i in range(height):
+        segm[i,:] = imageio.imread(segm_path / "slice_{:06d}.tiff".format(i))
+        
+    playdoh_count = np.count_nonzero(segm == 1)
+    pebble_count = np.count_nonzero(segm == 2)
+    
+    print("Playdoh, Pebble")
+    print("{},{}".format(playdoh_count, pebble_count))
         
 def check_intensity(input_folder):
     '''Computes mean value and standard deviations for materials based on the segmentation.
@@ -117,11 +153,15 @@ if __name__ == "__main__":
     config = {s:dict(parser.items(s)) for s in parser.sections()}
     input_folder = config['Paths']['obj_folder']
     
-    mode = "Segment"
-    
+    mode = "Preprocess projections"
+        
+    if mode == "Preprocess projections":
+        preprocess_proj(input_folder, 40)
     if mode == "Segment":
         reconstruct(input_folder, True)
-        segment(input_folder)
+        segment(input_folder, 3)
+        print(input_folder)
+        count_materials(input_folder)
     if mode == "Evaluate intensity":
         reconstruct(input_folder, False)
         check_intensity(input_folder)
