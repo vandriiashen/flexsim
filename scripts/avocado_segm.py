@@ -109,7 +109,7 @@ def reconstruct(input_folder, bh_correction):
     
     data.write_stack(save_path, 'slice', vol, dim = 0)
     
-def segment(input_folder, verbose = True):
+def segment(input_folder, verbose = False):
     '''Dual-space analysis by Robert van Liere.
     '''
     path = Path(input_folder)
@@ -311,8 +311,8 @@ def count_air(input_folder, proj_numbers):
         
     print("Volume,Proj_{},Proj_{},Proj_{},Proj_{},Proj_{},Proj_{}".format(*proj_numbers))
     print("{},{},{},{},{},{},{}".format(slice_air, *slice_proj))
-        
-if __name__ == "__main__":
+    
+def single_object_process():
     parser = ConfigParser()
     parser.read("avocado.ini")
     config = {s:dict(parser.items(s)) for s in parser.sections()}
@@ -321,7 +321,7 @@ if __name__ == "__main__":
     mode = "Preprocess projections"
         
     if mode == "Preprocess projections":
-        preprocess_proj(input_folder, 40)
+        preprocess_proj(input_folder, 24)
         print(input_folder)
     if mode == "Segment":
         reconstruct(input_folder, True)
@@ -331,3 +331,20 @@ if __name__ == "__main__":
     if mode == "Evaluate intensity":
         reconstruct(input_folder, False)
         check_intensity(input_folder)
+        
+def multiple_objects_process():
+    folders = ['/export/scratch2/vladysla/Data/Real/AvocadoSet/s1_dZ',
+               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s3_dZ',
+               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s5_dZ',
+               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s7_dZ',
+               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s8_dZ',
+               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s10_dZ']
+    
+    for input_folder in folders:
+        reconstruct(input_folder, True)
+        segment(input_folder)
+        preprocess_proj(input_folder, 40)
+        
+if __name__ == "__main__":
+    single_object_process()
+    #multiple_objects_process()

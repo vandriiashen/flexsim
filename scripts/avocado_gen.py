@@ -74,8 +74,8 @@ def avocado_gt_gen(config_fname):
     proj.create_projection(0, out_folder, 90)
     proj.create_gt(0, out_folder)
         
-    gt_folder = Path(out_folder) / "GT"
-    shutil.copytree(gt_folder, Path(obj_folder) / "gt")
+    #gt_folder = Path(out_folder) / "GT"
+    #shutil.copytree(gt_folder, Path(obj_folder) / "gt")
         
 def avocado_reduce_air(config_fname):
     '''Remove air pockets from volume
@@ -109,14 +109,16 @@ def avocado_reduce_air(config_fname):
         obj.affine_volume(scale, shear, rotation, translation, False)
         
         if i < aug_samples // 3:
-            total_regions = np.random.randint(25, 30)
-            drop_regions = np.random.randint(0, 10)
+            #total_regions = np.random.randint(25, 30)
+            total_regions = 40
+            drop_regions = np.random.randint(0, 20)
             obj.split_clusters(4, 2, total_regions, drop_regions, False)
         elif i < 2 * aug_samples // 3:
             obj.replace_material(4, 2)
         else:
-            total_regions = np.random.randint(60, 80)
-            keep_regions = np.random.randint(0, 8)
+            #total_regions = np.random.randint(60, 80)
+            total_regions = 80
+            keep_regions = np.random.randint(0, 20)
             drop_regions = total_regions - keep_regions
             obj.split_clusters(4, 2, total_regions, drop_regions, False)
             
@@ -128,7 +130,7 @@ def avocado_reduce_air(config_fname):
         obj.save_stats(out_folder, i*num_angles, num_angles)
         
 def avocado_add_air(config_fname):
-    '''Remove air pockets from volume
+    '''
     '''
     config = flexsim.utils.read_config(config_fname)
     
@@ -162,7 +164,7 @@ def avocado_add_air(config_fname):
                 sph_radius = np.random.uniform(1., 5.)
                 obj.create_sphere(2, 4, sph_centre, sph_radius)
             seed_com, r_seed = compute_seed_properties(obj)
-            obj.create_spherical_fragments(2, 4, seed_com, r_seed, 4., np.pi/2, 5)
+            obj.create_spherical_fragments(2, 4, seed_com, r_seed, 6., np.pi/2, 5)
         elif i < 2 * aug_samples // 3:
             obj.replace_material(4, 2)
         else:
@@ -175,7 +177,8 @@ def avocado_add_air(config_fname):
                 sph_radius = np.random.uniform(5., 12.)
                 obj.create_sphere(2, 4, sph_centre, sph_radius)
             seed_com, r_seed = compute_seed_properties(obj)
-            obj.create_spherical_fragments(2, 4, seed_com, r_seed, 8., np.pi, 10)
+            obj.create_spherical_fragments(2, 4, seed_com, r_seed, 6., np.pi/2, 10)
+            #obj.create_spherical_fragments(2, 4, seed_com, r_seed, 6., np.pi * 0.75, 8)
             
         scale = np.random.uniform(0.8, 1.2, size=(3,))
         shear = np.random.uniform(-0.2, 0.2, size=(3,))
@@ -191,7 +194,7 @@ def avocado_add_air(config_fname):
         obj.save_stats(out_folder, i*num_angles, num_angles)
         
 def avocado_add_air_single(config_fname, case_num):
-    '''Remove air pockets from volume
+    '''
     '''
     config = flexsim.utils.read_config(config_fname)
     

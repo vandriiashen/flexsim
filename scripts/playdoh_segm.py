@@ -146,8 +146,8 @@ def check_intensity(input_folder):
     print("Playdoh intensity std = {}".format(playdoh_std))
     print("Stone mean intensity = {}".format(stone_mean))
     print("Stone intensity std = {}".format(stone_std))
-        
-if __name__ == "__main__":
+    
+def single_object_process():
     parser = ConfigParser()
     parser.read("playdoh.ini")
     config = {s:dict(parser.items(s)) for s in parser.sections()}
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     mode = "Preprocess projections"
         
     if mode == "Preprocess projections":
-        preprocess_proj(input_folder, 40)
+        preprocess_proj(input_folder, 30)
     if mode == "Segment":
         reconstruct(input_folder, True)
         segment(input_folder, 3)
@@ -165,3 +165,15 @@ if __name__ == "__main__":
     if mode == "Evaluate intensity":
         reconstruct(input_folder, False)
         check_intensity(input_folder)
+        
+def multiple_objects_process():
+    folders = ['/export/scratch2/vladysla/Data/Real/AutomatedFOD/Object14_Scan20W']
+    
+    for input_folder in folders:
+        #reconstruct(input_folder, True)
+        #segment(input_folder, 2)
+        preprocess_proj(input_folder, 40)
+        
+if __name__ == "__main__":
+    multiple_objects_process()
+    

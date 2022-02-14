@@ -125,8 +125,12 @@ class ObjectCreator(object):
             phi_step = 0.1
             phi_mask = np.logical_and(phi > phi_start, phi < phi_start + phi_step)
             
-            theta_end = np.random.uniform(theta.min(), arc_start)
-            theta_start = np.random.uniform(theta.min(), theta_end)
+            #theta_end = np.random.uniform(theta.min(), arc_start)
+            #theta_start = np.random.uniform(theta.min(), theta_end)
+            
+            theta_end = np.random.uniform(arc_start, theta.max())
+            theta_start = np.random.uniform(arc_start, theta_end)
+            
             theta_mask = np.logical_and(theta > theta_start, theta < theta_end)
             
             R_step = np.random.uniform(0.5*thickness, 1.5*thickness)

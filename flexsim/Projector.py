@@ -119,6 +119,7 @@ class Projector(object):
                 imageio.imsave(folder / 'Noiseless' / '{:06d}.tiff'.format(start_num+i), log_noiseless[:,i,:].astype(np.float32))
         if self.noise_flag:
             proj = self.noise.add_noise(proj)
+            ff = self.noise.add_noise(ff)
         log = -np.log(np.divide(proj, ff))
         
         for i in range(self.num_angles):
