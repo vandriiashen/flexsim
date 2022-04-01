@@ -2,6 +2,7 @@ import numpy as np
 from pathlib import Path
 from configparser import ConfigParser
 import imageio
+import shutil
 from flexdata import display
 from flexdata import data
 from flextomo import projector
@@ -29,15 +30,15 @@ def apply_median_filter(vol, size):
         
     return vol_cpu
 
-def reconstruct(input_folder, bh_correction):
+def reconstruct(input_folder, output_folder, bh_correction = True, compound = 'H2O', density = 0.6):
     '''Reconstructs the volume using flexbox. Slices will be written to recon/ subfolder.
     '''
-    path = Path(input_folder)
+    path = output_folder
     if bh_correction == True:
         save_path = path / "recon_bh"
     else:
         save_path = path / "recon"
-    proj, geom = process.process_flex(path, sample = 2, skip = 1)
+    proj, geom = process.process_flex(input_folder, sample = 2, skip = 1, correct='cwi-flexray-2019-04-24')
 
     save_path.mkdir(exist_ok=True)
 
@@ -48,19 +49,20 @@ def reconstruct(input_folder, bh_correction):
     projector.FDK(proj, vol, geom)
     
     if bh_correction == True:
-        density = 0.6
-        energy, spec = analyze.calibrate_spectrum(proj, vol, geom, compound = 'H2O', density = density)   
-        proj_cor = process.equivalent_density(proj, geom, energy, spec, compound = 'H2O', density = density, preview=False)
+        density = density
+        compound = compound
+        energy, spec = analyze.calibrate_spectrum(proj, vol, geom, compound = compound, density = density, verbose = 2, plot_path = save_path)   
+        proj_cor = process.equivalent_density(proj, geom, energy, spec, compound = compound, density = density, preview=False)
         vol_rec = np.zeros_like(vol)
         projector.FDK(proj_cor, vol_rec, geom)
         vol = vol_rec
     
     data.write_stack(save_path, 'slice', vol, dim = 0)
     
-def segment(input_folder, otsu_classes):
+def segment(input_folder, output_folder, otsu_classes):
     '''Segments every slice with thresholding. Segmented slices will be written to segm/ subfolder.
     '''
-    path = Path(input_folder)
+    path = output_folder
     recon_path = path / "recon_bh"
     segm_path = path / "segm"
     segm_path.mkdir(exist_ok=True)
@@ -90,42 +92,25 @@ def segment(input_folder, otsu_classes):
     for i in range(height):
         imageio.imwrite(segm_path / "slice_{:06d}.tiff".format(i), segm_vol[i,:])
         
-def preprocess_proj(input_folder, skip_proj):
+def preprocess_proj(input_folder, output_folder, skip_proj):
     '''Applies darkfield- and flatfield-correction to projections and saves them to a separate folder.
     '''
-    path = Path(input_folder)
-    log_path = path / "log"
+    path = input_folder
+    out = output_folder
+    log_path = out / "log"
     log_path.mkdir(exist_ok=True)
     
-    proj, flat, dark, geom = data.read_flexray(path, sample = 2, skip = 1)
+    proj, flat, dark, geom = data.read_flexray(path, sample = 2, skip = 1, correct='cwi-flexray-2019-04-24')
     proj = process.preprocess(proj, flat, dark)
     proj = np.flip(proj, 0)
     
     for i in range(0,proj.shape[1],skip_proj):
         imageio.imwrite(log_path / "scan_{:06d}.tiff".format(i), proj[:,i,:])
         
-def count_materials(input_folder):
-    '''Computes the number of voxels filled with different materials
-    '''
-    path = Path(input_folder)
-    segm_path = path / "segm"
-    
-    height = len(list(segm_path.glob("*.tiff")))
-    im_shape = (imageio.imread(segm_path / "slice_{:06d}.tiff".format(0))).shape
-    segm = np.zeros((height, *im_shape), dtype=np.int16)
-    for i in range(height):
-        segm[i,:] = imageio.imread(segm_path / "slice_{:06d}.tiff".format(i))
-        
-    playdoh_count = np.count_nonzero(segm == 1)
-    pebble_count = np.count_nonzero(segm == 2)
-    
-    print("Playdoh, Pebble")
-    print("{},{}".format(playdoh_count, pebble_count))
-        
-def check_intensity(input_folder):
+def check_intensity(output_folder):
     '''Computes mean value and standard deviations for materials based on the segmentation.
     '''
-    path = Path(input_folder)
+    path = Path(output_folder)
     recon_path = path / "recon"
     segm_path = path / "segm"
     
@@ -146,34 +131,42 @@ def check_intensity(input_folder):
     print("Playdoh intensity std = {}".format(playdoh_std))
     print("Stone mean intensity = {}".format(stone_mean))
     print("Stone intensity std = {}".format(stone_std))
-    
-def single_object_process():
-    parser = ConfigParser()
-    parser.read("playdoh.ini")
-    config = {s:dict(parser.items(s)) for s in parser.sections()}
-    input_folder = config['Paths']['obj_folder']
-    
-    mode = "Preprocess projections"
-        
-    if mode == "Preprocess projections":
-        preprocess_proj(input_folder, 30)
-    if mode == "Segment":
-        reconstruct(input_folder, True)
-        segment(input_folder, 3)
-        print(input_folder)
-        count_materials(input_folder)
-    if mode == "Evaluate intensity":
-        reconstruct(input_folder, False)
-        check_intensity(input_folder)
         
 def multiple_objects_process():
-    folders = ['/export/scratch2/vladysla/Data/Real/AutomatedFOD/Object14_Scan20W']
+    input_root = Path('../../../Data/Real/AutomatedFOD/')
+    #input_root = Path('../../../Data/Real/Playdoh_extra/')
+    #input_root = Path('../../../Data/Real/Playdoh_nofo/')
+    output_root = Path('../../../Data/Generation/Playdoh/Simulation')
+    sub_folders = []
     
-    for input_folder in folders:
-        #reconstruct(input_folder, True)
-        #segment(input_folder, 2)
-        preprocess_proj(input_folder, 40)
+    for path in input_root.iterdir():
+        if path.is_dir():
+            sub_folders.append(path.name)
+
+    '''
+    check_num = [10]
+    for num in check_num:
+        sub_folders.append('Object{}_Scan20W'.format(num))
+    '''
         
+    sub_folders = sorted(sub_folders)
+    
+    input_folders = [input_root / sub_folder for sub_folder in sub_folders]
+    output_folders = [output_root / sub_folder for sub_folder in sub_folders]
+    assert len(input_folders) == len(output_folders)
+    
+    for i in range(len(input_folders)):
+        print(input_folders[i])
+        output_folders[i].mkdir(exist_ok=True)
+        
+        preprocess_proj(input_folders[i], output_folders[i], 5)
+        shutil.copy(input_folders[i] / 'scan settings.txt', output_folders[i])
+        reconstruct(input_folders[i], output_folders[i], bh_correction=False, compound='H2O', density=0.6)
+        
+        # Change the number of otsu classes depending on the presence of pebble stone in the sample
+        segment(input_folders[i], output_folders[i], 3)
+        #segment(input_folders[i], output_folders[i], 2)
+
 if __name__ == "__main__":
     multiple_objects_process()
     

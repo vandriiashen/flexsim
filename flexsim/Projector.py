@@ -35,8 +35,10 @@ class Projector(object):
         if self.noise_flag == False:
             self.save_noiseless_flag = True
         
-    def read_flexray_geometry(self, path, ang_range):
-        self.geom = flexdata.data.read_flexraylog(path)
+    def read_flexray_geometry(self, path, ang_range, sampling):
+        self.geom = flexdata.data.parse_flexray_scansettings(path, sample=sampling)
+        self.geom = flexdata.correct.correct(self.geom, profile='cwi-flexray-2019-04-24', do_print_changes=True)
+        self.geom = flexdata.correct.correct_vol_center(self.geom)
         
         # Calibration fixes
         '''
@@ -104,27 +106,17 @@ class Projector(object):
             return self.mono_fp(voltage)
     
     def create_projection(self, start_num, folder, voltage):
-        (folder / "{}".format(voltage)).mkdir(exist_ok=True)
-        folder = folder / "{}".format(voltage)
-        (folder / "Proj").mkdir(exist_ok=True)
-        (folder / "Log").mkdir(exist_ok=True)
-        if self.save_noiseless_flag:
-            (folder / "Noiseless").mkdir(exist_ok=True)
+        (folder / "log").mkdir(exist_ok=True)
         ff = self.noise.create_flatfield_image()
         proj = self.fp(voltage)
         
-        if self.save_noiseless_flag:
-            log_noiseless = -np.log(np.divide(proj, ff))
-            for i in range(self.num_angles):
-                imageio.imsave(folder / 'Noiseless' / '{:06d}.tiff'.format(start_num+i), log_noiseless[:,i,:].astype(np.float32))
         if self.noise_flag:
             proj = self.noise.add_noise(proj)
             ff = self.noise.add_noise(ff)
         log = -np.log(np.divide(proj, ff))
         
         for i in range(self.num_angles):
-            imageio.imsave(folder / 'Proj' / '{:06d}.tiff'.format(start_num+i), proj[:,i,:].astype(np.float32))
-            imageio.imsave(folder / 'Log' / '{:06d}.tiff'.format(start_num+i), log[:,i,:].astype(np.float32))
+            imageio.imsave(folder / 'log' / '{:06d}.tiff'.format(start_num+i), log[:,i,:].astype(np.float32))
             
         astra.data3d.clear()
         return log

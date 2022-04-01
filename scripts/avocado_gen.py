@@ -3,6 +3,7 @@ import imageio
 from pathlib import Path
 from scipy import ndimage
 from tqdm import tqdm
+import random
 import shutil
 
 import flexsim
@@ -72,11 +73,8 @@ def avocado_gt_gen(config_fname):
     proj.read_flexray_geometry(obj_folder, (0, 360))
         
     proj.create_projection(0, out_folder, 90)
-    proj.create_gt(0, out_folder)
-        
-    #gt_folder = Path(out_folder) / "GT"
-    #shutil.copytree(gt_folder, Path(obj_folder) / "gt")
-        
+    obj.save_stats(out_folder, 0, num_angles)
+                
 def avocado_reduce_air(config_fname):
     '''Remove air pockets from volume
     '''
@@ -254,13 +252,116 @@ def avocado_add_air_single(config_fname, case_num):
     proj.create_projection(0, out_folder, 90)
     proj.create_gt(0, out_folder)
     obj.save_stats(out_folder, 0, num_angles)
+    
+def get_avocado_volume_stats(obj):
+    mat_counts = []
+    for i in range(1, obj.mat.mat_count+1):
+        mat_counts.append(np.count_nonzero(obj.volume == i))
+    mat_counts = np.array(mat_counts)
+        
+    thr = 10**-2
+    air_ratio = mat_counts[3] / mat_counts.sum()
+    sample_class = 0
+    if air_ratio > thr:
+        sample_class = 1
+        
+    stat_line = "{},{}".format(",".join(str(num) for num in mat_counts), sample_class)
+    return stat_line
+    
+def avocado_basic_augmentation(config_fname, input_folder, out_subfolder, remove_air = False, vol_counts = np.array([0, 1, 0, 0])):
+    '''Generates projections without augmentation to get GT.
+    '''
+    config = flexsim.utils.read_config(config_fname)
+    
+    obj_folder = input_folder
+    obj_vol_folder = obj_folder / "segm"
+    out_folder = Path(config['Paths']['out_folder']) / out_subfolder
+    out_folder.mkdir(exist_ok=True)
+    
+    num_angles = config['Simulation']['num_angles']
+    energy_bins = config['Simulation']['energy_bins']
+    
+    obj_shape = flexsim.utils.get_volume_properties(obj_vol_folder)
+    proj_shape = (obj_shape[0], num_angles, obj_shape[2])
+    mat = flexsim.MaterialHandler(energy_bins, config['Materials'])
+    noise = flexsim.NoiseModel(proj_shape, config['Noise'])
+    
+    obj = flexsim.ObjectCreator(obj_shape, mat)
+    obj.set_flexray_volume(obj_vol_folder)
+    
+    mode = 'remove_fraction_of_air'
+    
+    if mode == 'remove_all_air':
+        if remove_air:
+            obj.replace_material(4, 2)
+    
+    if mode == 'remove_fraction_of_air':
+        if remove_air:
+            remove_all = np.random.randint(0, 3)
+            print(remove_all)
+            if remove_all == 0:
+                obj.replace_material(4, 2)
+            else:
+                fruit_volume = vol_counts.sum()
+                print(vol_counts)
+                print(fruit_volume)
+                tg_percentage = np.random.uniform(0., 0.01)
+                tg_count = int(fruit_volume * tg_percentage)
+                print(tg_percentage, tg_count)
+                total_clusters = 20
+                obj.split_clusters(4, 2, total_clusters, tg_count, True)
+        
+    proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
+    proj.read_flexray_geometry(obj_folder, (0, 360), 4)
+        
+    proj.create_projection(0, out_folder, 90)
+    stat_line = get_avocado_volume_stats(obj)
+    with open(out_folder / "volume_info.csv", "w") as f:
+        f.write("Peel,Meat,Seed,Air,Sample_class\n")
+        f.write(stat_line)
+    
+def batch_basic_augmentation(config_fname):
+    input_root = Path("../../../Data/Generation/Avocado/Training/")
+    subfolders = []
+    vol_counts = {}
+    for path in input_root.iterdir():
+        if path.is_dir():
+            data = np.loadtxt(path / 'volume_info.csv', skiprows=1, delimiter=',', dtype=int)
+            print(path)
+            print(data)
+            sample_class = data[-1]
+            if sample_class == 1:
+                subfolders.append(path.name)
+                vol_counts[path.name] = data[:-1]
+    subfolders = sorted(subfolders)
+    print(subfolders)
+    
+    for subfolder in subfolders:
+        print(subfolder)
+        avocado_basic_augmentation(config_fname, input_root / subfolder, "{}_fo".format(subfolder), False)
+        avocado_basic_augmentation(config_fname, input_root / subfolder, "{}_nofo".format(subfolder), True, vol_counts[subfolder])
+        
+def batch_replication(config_fname):
+    input_root = Path("../../../Data/Generation/Avocado/Training/")
+    subfolders = []
+    for path in input_root.iterdir():
+        if path.is_dir():
+            subfolders.append(path.name)
+    subfolders = sorted(subfolders)
+    print(subfolders)
+    
+    for subfolder in subfolders[:]:
+        avocado_basic_augmentation(config_fname, input_root / subfolder, "{}_noiseless".format(subfolder), False)
             
 if __name__ == "__main__":
     config_fname = "avocado.ini"
     # use different seeds for training and validation
-    np.random.seed(seed = 6)
+    random_seed = 6
+    np.random.seed(seed = random_seed)
+    random.seed(random_seed)
     
-    avocado_gt_gen(config_fname)
-    #avocado_reduce_air(config_fname)
-    #avocado_add_air(config_fname)
-    #avocado_add_air_single(config_fname, 3)
+    # Generate simulated projections based on real volume
+    #batch_replication(config_fname)
+    
+    # Generate new volumes by removing air
+    batch_basic_augmentation(config_fname)

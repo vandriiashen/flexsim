@@ -1,6 +1,6 @@
 flexsim/__pycache__/*
 flexsim.egg-info/*
-scripts/*.ini
+scripts/img/*
 Data/*
 doc/_build/*
 doc/_static/*

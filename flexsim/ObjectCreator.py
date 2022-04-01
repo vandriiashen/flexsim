@@ -153,6 +153,15 @@ class ObjectCreator(object):
         '''
         self.volume[self.volume == src_num] = dest_num
         
+    def replace_material_cluster(self, src_num, dest_num, num_clusters):
+        '''Changes material in voxels from source to dest based on cluster structure.
+        
+        '''
+        labels, nfeatures = scipy.ndimage.label(self.volume == src_num)
+        assert num_clusters <= nfeatures
+        for i in range(num_clusters):
+            self.volume[labels == i+1] = dest_num
+        
     def remove_material_clusters(self, src_num, dest_num, num_keep):
         '''Compute clusters of voxels filled with a certain material.
         '''
@@ -185,7 +194,22 @@ class ObjectCreator(object):
             point_coords = coords[seq[i],:]
             self.volume[point_coords[0], point_coords[1], point_coords[2]] = dest_num
             
-    def split_clusters(self, src_num, dest_num, num_classes, num_drop_classes, verbose=True):
+    def pick_clusters(self, class_sizes, tg_count):
+        sorted_sizes = sorted(class_sizes.items(), key = lambda x: x[1], reverse=True)
+        cluster_seq = []
+        
+        max_class_num = 3
+        for i in range(max_class_num):
+            for k, v in sorted_sizes:
+                if v < tg_count:
+                    cluster_seq.append(k)
+                    tg_count -= v
+                    sorted_sizes.remove((k, v))
+                    break
+                
+        return cluster_seq
+        
+    def split_clusters(self, src_num, dest_num, num_classes, tg_count, verbose=True):
         '''
         '''
         points = np.nonzero(self.volume == src_num)
@@ -201,13 +225,26 @@ class ObjectCreator(object):
         for i in range(num_classes):
             dist_map[:,i] = np.power(np.subtract(coords, coords[seq[i],:]), 2).sum(axis=1)
         class_map = np.argmin(dist_map, axis=1)
+        class_sizes = {}
+        for i in range(num_classes):
+                class_sizes[i] = np.count_nonzero(class_map == i)
+                
         if verbose:
-            print(dist_map[:10,:])
-            print(class_map[:10])
-            for i in range(num_classes):
-                print(np.count_nonzero(class_map == i))
+            print("Sizes of classes:")
+            print(class_sizes)
+            
+        cluster_seq = self.pick_clusters(class_sizes, tg_count)
+        drop_classes = [i for i in range(num_classes) if i not in cluster_seq]
+        
+        if verbose:
+            print("Chosen classes:")
+            total_size = 0
+            for i in cluster_seq:
+                total_size += class_sizes[i]
+                print(i, class_sizes[i])
+            print("Target voxel number = {}, generated {}".format(tg_count, total_size))
                     
-        for i in range(num_drop_classes):
+        for i in drop_classes:
             select = coords[class_map==i,:]
             self.volume[select[:,0], select[:,1], select[:,2]] = dest_num
         

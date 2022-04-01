@@ -1,33 +1,18 @@
 import numpy as np
 from pathlib import Path
 from configparser import ConfigParser
+import shutil
+from tqdm import tqdm
 import imageio
-from flexdata import display
-from flexdata import data
-from flextomo import projector
-from flexcalc import process
-from flexcalc import analyze
-import scipy.ndimage
-import scipy.stats
-import scipy.optimize
-import scipy.signal
 import cupy
 import cupyx.scipy.ndimage
 import skimage
-import skimage.segmentation
-import skimage.morphology
-import skimage.filters
-import skimage.measure
-import skimage.transform
-import skimage.util
+import scipy.ndimage
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from tqdm import tqdm
-
-def sphere_fitfunc(p, coords):
-    z0, y0, x0, R = p
-    z, y, x = coords.T
-    return np.sqrt((x-x0)**2 + (y-y0)**2 + (z-z0)**2)
+from flexdata import display, data
+from flextomo import projector
+from flexcalc import process, analyze
 
 def get_bounding_box(mask):
     z = np.any(mask, axis=(1, 2))
@@ -61,7 +46,7 @@ def show3(title, vol) :
     ax[2].imshow(vol[midZ,:,:], cmap=cm.gray)
 
     plt.tight_layout()
-    plt.savefig("{}.png".format(title))
+    plt.savefig("./img/{}.png".format(title))
     
 def invert_volume(vol):
     return (~(vol.astype(bool))).astype(vol.dtype)
@@ -81,15 +66,15 @@ def apply_median_filter(vol, size):
         
     return vol_cpu
 
-def reconstruct(input_folder, bh_correction):
+def reconstruct(input_folder, output_folder, bh_correction = True, compound = 'H2O', density = 0.6):
     '''Reconstructs the volume using flexbox. Slices will be written to recon/ subfolder.
     '''
-    path = Path(input_folder)
+    path = output_folder
     if bh_correction == True:
         save_path = path / "recon_bh"
     else:
         save_path = path / "recon"
-    proj, geom = process.process_flex(path, sample = 4, skip = 1)
+    proj, geom = process.process_flex(input_folder, sample = 4, skip = 1, correct='cwi-flexray-2019-04-24')
 
     save_path.mkdir(exist_ok=True)
 
@@ -100,19 +85,18 @@ def reconstruct(input_folder, bh_correction):
     projector.FDK(proj, vol, geom)
     
     if bh_correction == True:
-        density = 0.4
-        energy, spec = analyze.calibrate_spectrum(proj, vol, geom, compound = 'H2O', density = density)   
-        proj_cor = process.equivalent_density(proj, geom, energy, spec, compound = 'H2O', density = density, preview=False)
+        density = density
+        compound = compound
+        energy, spec = analyze.calibrate_spectrum(proj, vol, geom, compound = compound, density = density, verbose = 2, plot_path = save_path)   
+        proj_cor = process.equivalent_density(proj, geom, energy, spec, compound = compound, density = density, preview=False)
         vol_rec = np.zeros_like(vol)
         projector.FDK(proj_cor, vol_rec, geom)
         vol = vol_rec
     
     data.write_stack(save_path, 'slice', vol, dim = 0)
     
-def segment(input_folder, verbose = False):
-    '''Dual-space analysis by Robert van Liere.
-    '''
-    path = Path(input_folder)
+def segment(input_folder, output_folder, verbose = True):
+    path = output_folder
     recon_path = path / "recon_bh"
     segm_path = path / "segm"
     segm_path.mkdir(exist_ok=True)
@@ -130,11 +114,36 @@ def segment(input_folder, verbose = False):
         
     thr_holder = skimage.filters.threshold_otsu(vol)
     vol = ((skimage.morphology.binary_opening(vol > thr_holder, np.ones((5,5,5), np.uint8)).astype(np.uint8))) * vol
+    
     if verbose:
         print("Holder removed")
         show3("without_holder", vol)
+    
+    shape_before_downscale = vol.shape
+    vol_downscaled = skimage.transform.downscale_local_mean(vol, (4,4,4))
+    vol_downscaled = (vol_downscaled>0).astype(np.uint8)
+    vol_downscaled_convex = skimage.morphology.convex_hull.convex_hull_image(vol_downscaled)
+    vol_convex = skimage.transform.resize(vol_downscaled_convex, shape_before_downscale)
+    vol_convex = (vol_convex>0).astype(np.uint8)
         
+    #vol_convex should not include the boundary of the fruit, but needs to cover the air gaps inside
+    num_erosion = 10
+    for i in range(num_erosion):
+        vol_convex = skimage.morphology.binary_erosion(vol_convex)
+    #remove the top of the fruit to avoid problems with connection to branch
+    #top_cut = 30
+    top_cut = 5
+    vol_bbox = get_bounding_box(vol_convex)
+    print(vol_bbox[0])
+    vol_convex[vol_bbox[0]:vol_bbox[0]+top_cut,:,:] = 0
+    
+    if verbose:
+        print("Volume convex hull")
+        show3("vol_convex", vol_convex)
+
     peel0 = skimage.morphology.binary_dilation(skimage.morphology.binary_dilation(vol>0)) * invert_volume(vol)
+    peel0[vol_convex > 0] = 0
+        
     labels, nfeatures = scipy.ndimage.label(peel0)
     props = skimage.measure.regionprops(labels)
     if verbose:
@@ -149,9 +158,17 @@ def segment(input_folder, verbose = False):
         print("Peel segmented")
         show3("peel", peel)
     
-    meatpit = vol * invert_volume (peel)
+    meatpit = vol * invert_volume(peel)
     meatpit = apply_median_filter(meatpit, 3)
-    thr_meatpit = skimage.filters.threshold_multiotsu(vol)
+    
+    plt.clf()
+    plt.hist(meatpit[meatpit > 0].ravel(), bins=256)
+    plt.savefig("./img/meatpit_hist.png")
+    plt.clf()
+
+    thr_meatpit = skimage.filters.threshold_multiotsu(meatpit[meatpit > 0])
+    if verbose:
+        print("Multiotsu thresholds = {}".format(thr_meatpit))
     labels, nfeatures = scipy.ndimage.label((meatpit>thr_meatpit[-1]).astype(np.uint8))
     props = skimage.measure.regionprops(labels)
     if verbose:
@@ -177,47 +194,34 @@ def segment(input_folder, verbose = False):
     if verbose:
         print("Meat segmented")
         show3("meat", meat)
-    
-    zmin, zmax, ymin, ymax, xmin, xmax = get_bounding_box(peel)
-    peel_subvolume = peel[zmin:zmax, ymin:ymax, xmin:xmax]
-    shape_before_downscale = peel_subvolume.shape
-    peel_subvolume = skimage.transform.downscale_local_mean(peel_subvolume, (2,2,2))
-    peel_subvolume = (peel_subvolume>0).astype(np.uint8)
+
+    background = (vol_convex == 0).astype(np.uint8)
+
     if verbose:
-        print("Convex hull of peel: ", zmin, zmax, ymin, ymax, xmin, xmax)
-        print("Volume size reduction factor = ", float(peel_subvolume.size) / peel.size)
-    peel_subvolume_convex = skimage.morphology.convex_hull.convex_hull_image(peel_subvolume)
-    peel_subvolume_convex = skimage.transform.resize(peel_subvolume, shape_before_downscale)
-    peel_subvolume_convex = (peel_subvolume_convex>0).astype(np.uint8)
-    peel_convex = np.zeros_like(peel, dtype=np.uint8)
-    peel_convex[zmin:zmax, ymin:ymax, xmin:xmax] = peel_subvolume_convex
-    if verbose:
-        print("Peel convex hull constructed")
-        show3("peel_convex", peel_convex)
-    
-    background = skimage.segmentation.flood_fill(peel_convex, (1, 1, 1), 1, connectivity=1)
+        print("Background constructed")
+        show3("background", background)
     air_gaps = skimage.util.invert((background+meatpit+peel)>0).astype(np.uint8)
-    air_gaps = skimage.morphology.binary_dilation(skimage.morphology.binary_erosion(air_gaps))
+
     if verbose:
         print("Air gaps segmented")
         show3("air_gaps", air_gaps)
-    
+
     segm_vol[peel == 1] = 1
     segm_vol[meat == 1] = 2
     segm_vol[pit == 1] = 3
     segm_vol[air_gaps == 1] = 4
-    
+
     if verbose:
         print("Segmentation is complete")
-        show3("segm", segm_vol)
+        show3("segm_extra_{}".format(path.name), segm_vol)
     
     for i in range(height):
         imageio.imwrite(segm_path / "slice_{:06d}.tiff".format(i), segm_vol[i,:])
         
-def count_materials(input_folder):
+def count_materials(input_folder, output_folder):
     '''Computes the number of voxels filled with different materials
     '''
-    path = Path(input_folder)
+    path = output_folder
     segm_path = path / "segm"
     
     height = len(list(segm_path.glob("*.tiff")))
@@ -232,13 +236,13 @@ def count_materials(input_folder):
     air_count = np.count_nonzero(segm == 4)
     seed_com = scipy.ndimage.center_of_mass(segm == 3)
     
-    print("Peel,Avocado,Seed,Air,Seed_COM")
-    print("{},{},{},{},{:.2f},{:.2f},{:.2f}".format(peel_count, avocado_count, seed_count, air_count, *seed_com))
+    #print("Peel,Avocado,Seed,Air,Seed_COM")
+    print("{},{},{},{},{}".format(path.name, peel_count, avocado_count, seed_count, air_count))
         
-def check_intensity(input_folder):
+def check_intensity(output_folder):
     '''Computes mean value and standard deviations for materials based on the segmentation.
     '''
-    path = Path(input_folder)
+    path = output_folder
     recon_path = path / "recon"
     segm_path = path / "segm"
     
@@ -252,99 +256,74 @@ def check_intensity(input_folder):
         
     peel_mean = vol[segm == 1].mean()
     peel_std = vol[segm == 1].std()
+    peel_count = np.count_nonzero(segm == 1)
     avocado_mean = vol[segm == 2].mean()
     avocado_std = vol[segm == 2].std()
+    avocado_count = np.count_nonzero(segm == 2)
     seed_mean = vol[segm == 3].mean()
     seed_std = vol[segm == 3].std()
+    seed_count = np.count_nonzero(segm == 3)
     air_mean = vol[segm == 4].mean()
     air_std = vol[segm == 4].std()
+    air_count = np.count_nonzero(segm == 4)
     
-    print("Peel intensity = {} +- {} (should be multiplied by 2 to account for binning)".format(peel_mean, peel_std))
-    print("Avocado intensity = {} +- {}".format(avocado_mean, avocado_std))
-    print("Seed intensity = {} +- {}".format(seed_mean, seed_std))
-    print("Air gap intensity = {} +- {}".format(air_mean, air_std))
+    print("Peel intensity =         {:0.4f} +- {:0.4f} ({} voxels)".format(peel_mean, peel_std, peel_count))
+    print("Avocado intensity =      {:0.4f} +- {:0.4f} ({} voxels)".format(avocado_mean, avocado_std, avocado_count))
+    print("Seed intensity =         {:0.4f} +- {:0.4f} ({} voxels)".format(seed_mean, seed_std, seed_count))
+    print("Air gap intensity =      {:0.4f} +- {:0.4f} ({} voxels)".format(air_mean, air_std, air_count))
     
-def preprocess_proj(input_folder, skip_proj):
+def preprocess_proj(input_folder, output_folder, skip_proj):
     '''Applies darkfield- and flatfield-correction to projections and saves them to a separate folder.
     '''
-    path = Path(input_folder)
-    log_path = path / "log"
+    path = input_folder
+    out = output_folder
+    log_path = out / "log"
     log_path.mkdir(exist_ok=True)
     
-    proj, flat, dark, geom = data.read_flexray(path, sample = 4, skip = 1)
+    proj, flat, dark, geom = data.read_flexray(path, sample = 4, skip = 1, correct='cwi-flexray-2019-04-24')
     proj = process.preprocess(proj, flat, dark)
     proj = np.flip(proj, 0)
     
     for i in range(0,proj.shape[1],skip_proj):
-        imageio.imwrite(log_path / "scan_{:06d}.tiff".format(i), proj[:,i,:])
-        
-def count_air(input_folder, proj_numbers):
-    '''Counts air voxels in the segmented volume and air pixels on projection specified by proj_numbers
-    '''
-    path = Path(input_folder)
-    proj_path = path / "gt"
-    slice_path = path / "segm"
-    
-    slice_air = 0
-    slice_meat = 0
-    height = len(list(slice_path.glob("*.tiff")))
-    for i in range(height):
-        sl = imageio.imread(slice_path / "slice_{:06d}.tiff".format(i))
-        unique, counts = np.unique(sl, return_counts=True)
-        val_dict = dict(zip(unique, counts))
-        if 1 in unique:
-            slice_meat += val_dict[1]
-        if 2 in unique:
-            slice_air += val_dict[2]
-    slice_air /= (slice_meat+slice_air)
-    
-    slice_proj = np.zeros((len(proj_numbers)), dtype=np.float32)
-    meat_proj = np.zeros((len(proj_numbers)), dtype=np.float32)
-    for i in range(len(proj_numbers)):
-        proj = imageio.imread(proj_path / "{:06d}.tiff".format(proj_numbers[i]))
-        unique, counts = np.unique(proj, return_counts=True)
-        val_dict = dict(zip(unique, counts))
-        if 2 in unique:
-            slice_proj[i] = val_dict[2]
-            meat_proj[i] = val_dict[1]
-            slice_proj[i] /= (meat_proj[i]+slice_proj[i])
-        
-    print("Volume,Proj_{},Proj_{},Proj_{},Proj_{},Proj_{},Proj_{}".format(*proj_numbers))
-    print("{},{},{},{},{},{},{}".format(slice_air, *slice_proj))
-    
-def single_object_process():
-    parser = ConfigParser()
-    parser.read("avocado.ini")
-    config = {s:dict(parser.items(s)) for s in parser.sections()}
-    input_folder = config['Paths']['obj_folder']
-    
-    mode = "Preprocess projections"
-        
-    if mode == "Preprocess projections":
-        preprocess_proj(input_folder, 24)
-        print(input_folder)
-    if mode == "Segment":
-        reconstruct(input_folder, True)
-        segment(input_folder)
-        print(input_folder)
-        count_materials(input_folder)
-    if mode == "Evaluate intensity":
-        reconstruct(input_folder, False)
-        check_intensity(input_folder)
+        imageio.imwrite(log_path / "scan_{:06d}.tiff".format(i), proj[:,i,:])    
         
 def multiple_objects_process():
-    folders = ['/export/scratch2/vladysla/Data/Real/AvocadoSet/s1_dZ',
-               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s3_dZ',
-               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s5_dZ',
-               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s7_dZ',
-               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s8_dZ',
-               '/export/scratch2/vladysla/Data/Real/AvocadoSet/s10_dZ']
+    input_root = Path('/export/scratch2/vladysla/Data/Real/Avocado_extra/')
+    #input_root = Path('/export/scratch2/vladysla/Data/Real/AvocadoSet/')
+    #input_root = Path('/export/scratch2/vladysla/Data/Real/AvocadoScans/')
+    output_root = Path('/export/scratch2/vladysla/Data/Generation/Avocado/Training')
     
-    for input_folder in folders:
-        reconstruct(input_folder, True)
-        segment(input_folder)
-        preprocess_proj(input_folder, 40)
+    sub_folders = []
+    
+    fruit_numbers = list(range(1, 13))
+    for num in fruit_numbers:
+        sub_folders.append('s{:02d}_d01'.format(num))
+        sub_folders.append('s{:02d}_d06'.format(num))
+        sub_folders.append('s{:02d}_d09'.format(num))
+    
+    sub_folders.extend(['s13_d01', 's13_d07', 's13_d09', 's14_d01', 's14_d07', 's14_d09', 's15_d01'])
+    remove_obj = ['s01_d01', 's03_d06', 's03_d09', 's06_d01', 's08_d01', 's09_d06', 's10_d06']
+    for obj in remove_obj:
+        sub_folders.remove(obj)
+    
+    print(sub_folders)
+    print(len(sub_folders))
+    input_folders = [input_root / sub_folder for sub_folder in sub_folders]
+    output_folders = [output_root / sub_folder for sub_folder in sub_folders]
+    assert len(input_folders) == len(output_folders)
+    
+    for i in range(len(input_folders)):
+        print(input_folders[i])
+        output_folders[i].mkdir(exist_ok=True)
+        
+        preprocess_proj(input_folders[i], output_folders[i], 2)
+        shutil.copy(input_folders[i] / 'scan settings.txt', output_folders[i])
+        reconstruct(input_folders[i], output_folders[i], bh_correction=True, compound='H2O', density=0.6)
+        segment(input_folders[i], output_folders[i])
+        
+        # Check average attenuation for every label
+        #reconstruct(input_folders[i], output_folders[i], bh_correction=False)
+        #check_intensity(output_folders[i])
         
 if __name__ == "__main__":
-    single_object_process()
-    #multiple_objects_process()
+    multiple_objects_process()
