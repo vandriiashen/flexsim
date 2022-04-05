@@ -7,257 +7,9 @@ import random
 import shutil
 
 import flexsim
-
-def compute_seed_properties(obj):
-    seed_com = ndimage.center_of_mass(obj.volume == 3)
-    Z, Y, X = np.ogrid[:obj.size[0], :obj.size[1], :obj.size[2]]
-    Z -= int(seed_com[0])
-    Y -= int(seed_com[1])
-    X -= int(seed_com[2])
-    R = np.sqrt(X**2 + Y**2 + Z**2)
-    R_seed = R[obj.volume == 3].max()
-    
-    return (seed_com, R_seed)
-        
-def avocado_gt_gen_full_angles(config_fname):
-    '''Generates projections without augmentation to get GT.
-    '''
-    config = flexsim.utils.read_config(config_fname)
-    
-    obj_folder = Path(config['Paths']['obj_folder'])
-    obj_vol_folder = obj_folder / "segm"
-    out_folder = Path(config['Paths']['out_folder'])
-    
-    num_angles = config['Simulation']['num_angles']
-    energy_bins = config['Simulation']['energy_bins']
-    
-    obj_shape = flexsim.utils.get_volume_properties(obj_vol_folder)
-    proj_shape = (obj_shape[0], num_angles, obj_shape[2])
-    mat = flexsim.MaterialHandler(energy_bins, config['Materials'])
-    noise = flexsim.NoiseModel(proj_shape, config['Noise'])
-    
-    obj = flexsim.ObjectCreator(obj_shape, mat)
-    obj.set_flexray_volume(obj_vol_folder)
-        
-    for i in range(4):
-        proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
-        proj.read_flexray_geometry(obj_folder, (90*i, 90*(i+1)))
-        
-        proj.create_projection(360*i, out_folder, 90)
-        proj.create_gt(360*i, out_folder)
-        
-    gt_folder = Path(out_folder) / "GT"
-    shutil.copytree(gt_folder, Path(obj_folder) / "gt")
-    
-def avocado_gt_gen(config_fname):
-    '''Generates projections without augmentation to get GT.
-    '''
-    config = flexsim.utils.read_config(config_fname)
-    
-    obj_folder = Path(config['Paths']['obj_folder'])
-    obj_vol_folder = obj_folder / "segm"
-    out_folder = Path(config['Paths']['out_folder'])
-    
-    num_angles = config['Simulation']['num_angles']
-    energy_bins = config['Simulation']['energy_bins']
-    
-    obj_shape = flexsim.utils.get_volume_properties(obj_vol_folder)
-    proj_shape = (obj_shape[0], num_angles, obj_shape[2])
-    mat = flexsim.MaterialHandler(energy_bins, config['Materials'])
-    noise = flexsim.NoiseModel(proj_shape, config['Noise'])
-    
-    obj = flexsim.ObjectCreator(obj_shape, mat)
-    obj.set_flexray_volume(obj_vol_folder)
-        
-    proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
-    proj.read_flexray_geometry(obj_folder, (0, 360))
-        
-    proj.create_projection(0, out_folder, 90)
-    obj.save_stats(out_folder, 0, num_angles)
-                
-def avocado_reduce_air(config_fname):
-    '''Remove air pockets from volume
-    '''
-    config = flexsim.utils.read_config(config_fname)
-    
-    obj_folder = Path(config['Paths']['obj_folder'])
-    obj_vol_folder = obj_folder / "segm"
-    out_folder = Path(config['Paths']['out_folder'])
-    
-    num_angles = config['Simulation']['num_angles']
-    energy_bins = config['Simulation']['energy_bins']
-    
-    obj_shape = flexsim.utils.get_volume_properties(obj_vol_folder)
-    proj_shape = (obj_shape[0], num_angles, obj_shape[2])
-    mat = flexsim.MaterialHandler(energy_bins, config['Materials'])
-    noise = flexsim.NoiseModel(proj_shape, config['Noise'])
-    aug_samples = config['Simulation']['augmentation_samples']
-    
-    with open(out_folder / "stats.csv", "w") as f:
-        f.write("Proj_num,Peel,Meat,Seed,Air\n")
-    
-    for i in tqdm(range(aug_samples)):
-        obj = flexsim.ObjectCreator(obj_shape, mat)
-        obj.set_flexray_volume(obj_vol_folder)
-        
-        scale = np.random.uniform(0.8, 1.2, size=(3,))
-        shear = np.random.uniform(-0.2, 0.2, size=(3,))
-        rotation = (0., 0., 0.)
-        translation = (0., 0., 0.)
-        obj.affine_volume(scale, shear, rotation, translation, False)
-        
-        if i < aug_samples // 3:
-            #total_regions = np.random.randint(25, 30)
-            total_regions = 40
-            drop_regions = np.random.randint(0, 20)
-            obj.split_clusters(4, 2, total_regions, drop_regions, False)
-        elif i < 2 * aug_samples // 3:
-            obj.replace_material(4, 2)
-        else:
-            #total_regions = np.random.randint(60, 80)
-            total_regions = 80
-            keep_regions = np.random.randint(0, 20)
-            drop_regions = total_regions - keep_regions
-            obj.split_clusters(4, 2, total_regions, drop_regions, False)
-            
-        proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
-        proj.read_flexray_geometry(obj_folder, (0, 360))
-            
-        proj.create_projection(i*num_angles, out_folder, 90)
-        proj.create_gt(i*num_angles, out_folder)
-        obj.save_stats(out_folder, i*num_angles, num_angles)
-        
-def avocado_add_air(config_fname):
-    '''
-    '''
-    config = flexsim.utils.read_config(config_fname)
-    
-    obj_folder = Path(config['Paths']['obj_folder'])
-    obj_vol_folder = obj_folder / "segm"
-    out_folder = Path(config['Paths']['out_folder'])
-    
-    num_angles = config['Simulation']['num_angles']
-    energy_bins = config['Simulation']['energy_bins']
-    
-    obj_shape = flexsim.utils.get_volume_properties(obj_vol_folder)
-    proj_shape = (obj_shape[0], num_angles, obj_shape[2])
-    mat = flexsim.MaterialHandler(energy_bins, config['Materials'])
-    noise = flexsim.NoiseModel(proj_shape, config['Noise'])
-    aug_samples = config['Simulation']['augmentation_samples']
-    
-    with open(out_folder / "stats.csv", "w") as f:
-        f.write("Proj_num,Peel,Meat,Seed,Air\n")
-            
-    for i in tqdm(range(aug_samples)):
-        obj = flexsim.ObjectCreator(obj_shape, mat)
-        obj.set_flexray_volume(obj_vol_folder)        
-        
-        if i < aug_samples // 3:
-            small_spheres_num = np.random.randint(1, 2)
-            for j in range(small_spheres_num):
-                c_z = np.random.randint(60, 120)
-                c_y = np.random.randint(180, 300)
-                c_x = np.random.randint(180, 300)
-                sph_centre = np.array([c_z, c_y, c_x])
-                sph_radius = np.random.uniform(1., 5.)
-                obj.create_sphere(2, 4, sph_centre, sph_radius)
-            seed_com, r_seed = compute_seed_properties(obj)
-            obj.create_spherical_fragments(2, 4, seed_com, r_seed, 6., np.pi/2, 5)
-        elif i < 2 * aug_samples // 3:
-            obj.replace_material(4, 2)
-        else:
-            small_spheres_num = np.random.randint(1, 3)
-            for j in range(small_spheres_num):
-                c_z = np.random.randint(60, 120)
-                c_y = np.random.randint(180, 300)
-                c_x = np.random.randint(180, 300)
-                sph_centre = np.array([c_z, c_y, c_x])
-                sph_radius = np.random.uniform(5., 12.)
-                obj.create_sphere(2, 4, sph_centre, sph_radius)
-            seed_com, r_seed = compute_seed_properties(obj)
-            obj.create_spherical_fragments(2, 4, seed_com, r_seed, 6., np.pi/2, 10)
-            #obj.create_spherical_fragments(2, 4, seed_com, r_seed, 6., np.pi * 0.75, 8)
-            
-        scale = np.random.uniform(0.8, 1.2, size=(3,))
-        shear = np.random.uniform(-0.2, 0.2, size=(3,))
-        rotation = (0., 0., 0.)
-        translation = (0., 0., 0.)
-        obj.affine_volume(scale, shear, rotation, translation, False)
-                    
-        proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
-        proj.read_flexray_geometry(obj_folder, (0, 360))
-            
-        proj.create_projection(i*num_angles, out_folder, 90)
-        proj.create_gt(i*num_angles, out_folder)
-        obj.save_stats(out_folder, i*num_angles, num_angles)
-        
-def avocado_add_air_single(config_fname, case_num):
-    '''
-    '''
-    config = flexsim.utils.read_config(config_fname)
-    
-    obj_folder = Path(config['Paths']['obj_folder'])
-    obj_vol_folder = obj_folder / "segm"
-    out_folder = Path(config['Paths']['out_folder'])
-    
-    num_angles = config['Simulation']['num_angles']
-    energy_bins = config['Simulation']['energy_bins']
-    
-    obj_shape = flexsim.utils.get_volume_properties(obj_vol_folder)
-    proj_shape = (obj_shape[0], num_angles, obj_shape[2])
-    mat = flexsim.MaterialHandler(energy_bins, config['Materials'])
-    noise = flexsim.NoiseModel(proj_shape, config['Noise'])
-    aug_samples = config['Simulation']['augmentation_samples']
-    
-    with open(out_folder / "stats.csv", "w") as f:
-        f.write("Proj_num,Peel,Meat,Seed,Air\n")
-            
-    obj = flexsim.ObjectCreator(obj_shape, mat)
-    obj.set_flexray_volume(obj_vol_folder)
-    
-    if case_num == 0:
-        '''No augmentations'''
-        pass
-    if case_num == 1:
-        '''Small amount of air'''
-        np.random.seed(seed = 15)
-        obj.create_sphere(2, 4, (70, 250, 180), 5.)
-        obj.create_sphere(2, 4, (105, 200, 290), 4.)
-        seed_com, r_seed = compute_seed_properties(obj)
-        obj.create_spherical_fragments(2, 4, seed_com, r_seed, 5., np.pi/2, 4)
-    if case_num == 2:
-        '''Large amount of air'''
-        np.random.seed(seed = 7)
-        obj.create_sphere(2, 4, (90, 220, 220), 7.)
-        obj.create_sphere(2, 4, (105, 200, 290), 4.)
-        seed_com, r_seed = compute_seed_properties(obj)
-        obj.create_spherical_fragments(2, 4, seed_com, r_seed, 6., np.pi, 10)
-    if case_num == 3:
-        '''Large amount of air + main object transform'''
-        np.random.seed(seed = 3)
-        obj.create_sphere(2, 4, (90, 220, 220), 7.)
-        obj.create_sphere(2, 4, (70, 250, 180), 5.)
-        seed_com, r_seed = compute_seed_properties(obj)
-        obj.create_spherical_fragments(2, 4, seed_com, r_seed, 5., np.pi, 10)
-        
-        scale = (0.9, 1.1, 1.1)
-        shear = (0.1, 0., 0.)
-        rotation = (0., 0., 0.)
-        translation = (0., 0., 0.)
-        obj.affine_volume(scale, shear, rotation, translation, False)
-                    
-    proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
-    proj.read_flexray_geometry(obj_folder, (0, 360))
-            
-    proj.create_projection(0, out_folder, 90)
-    proj.create_gt(0, out_folder)
-    obj.save_stats(out_folder, 0, num_angles)
     
 def get_avocado_volume_stats(obj):
-    mat_counts = []
-    for i in range(1, obj.mat.mat_count+1):
-        mat_counts.append(np.count_nonzero(obj.volume == i))
-    mat_counts = np.array(mat_counts)
+    mat_counts = obj.get_stats()
         
     thr = 10**-2
     air_ratio = mat_counts[3] / mat_counts.sum()
@@ -267,9 +19,77 @@ def get_avocado_volume_stats(obj):
         
     stat_line = "{},{}".format(",".join(str(num) for num in mat_counts), sample_class)
     return stat_line
+
+def avocado_generation(config_fname, input_folder, out_nofo, out_fo, vol_counts):
+    '''
+    '''
+    config = flexsim.utils.read_config(config_fname)
+    
+    obj_folder = input_folder
+    obj_vol_folder = obj_folder / "segm"
+    out_nofo = Path(config['Paths']['out_folder']) / out_nofo
+    out_nofo.mkdir(exist_ok=True)
+    out_fo = Path(config['Paths']['out_folder']) / out_fo
+    out_fo.mkdir(exist_ok=True)
+    
+    num_angles = config['Simulation']['num_angles']
+    energy_bins = config['Simulation']['energy_bins']
+    
+    obj_shape = flexsim.utils.get_volume_properties(obj_vol_folder)
+    proj_shape = (obj_shape[0], num_angles, obj_shape[2])
+    mat = flexsim.MaterialHandler(energy_bins, config['Materials'])
+    noise = flexsim.NoiseModel(proj_shape, config['Noise'])
+    
+    obj = flexsim.ObjectCreator(obj_shape, mat)
+    obj.set_flexray_volume(obj_vol_folder)
+    fruit_volume = vol_counts.sum()
+    
+    # Perform affine transformation of the whole fruit
+    scale = np.random.uniform(0.8, 1.2, size=(3,))
+    shear = np.random.uniform(-0.2, 0.2, size=(3,))
+    rotation = (0., 0., 0.)
+    translation = (0., 0., 0.)
+    print("Main object transformation: {}, {}, {}, {}".format(scale, shear, rotation, translation))
+    kwargs = {'mat_num' : 4, 'scale' : scale, 'shear' : shear, 'rotation' : rotation, 'translation' : translation}
+    obj.modify_volume(flexsim.transform.affine_volume, kwargs)
+    obj.save_volume(out_fo)
+    volume_save = np.copy(obj.get_volume())
+    
+    # Generate a sample with a bit of air
+    tg_percentage = np.random.uniform(0., 0.005)
+    tg_count = int(fruit_volume * tg_percentage)
+    total_clusters = 20
+    kwargs = {'src_num' : 4, 'dest_num' : 2, 'num_classes' : total_clusters, 'tg_count' : tg_count, 'pick_func' : flexsim.transform.keep_few_clusters, 'verbose' : True}
+    obj.modify_volume(flexsim.transform.remove_air_clusters, kwargs)
+    obj.save_volume(out_nofo)
+    
+    proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
+    proj.read_flexray_geometry(obj_folder, (0, 360), 4)
+    proj.create_projection(0, out_nofo, 90)
+    stat_line = get_avocado_volume_stats(obj)
+    with open(out_nofo / "volume_info.csv", "w") as f:
+        f.write("Peel,Meat,Seed,Air,Sample_class\n")
+        f.write(stat_line)
+        
+    # Reset volume and generate a sample with the same main object geometry but different amount of air_ratio
+    obj = flexsim.ObjectCreator(obj_shape, mat)
+    obj.set_volume(volume_save)
+    tg_percentage = np.random.uniform(0.01, 0.05)
+    tg_count = int(fruit_volume * tg_percentage)
+    total_clusters = 6
+    kwargs = {'src_num' : 4, 'dest_num' : 2, 'num_classes' : total_clusters, 'tg_count' : tg_count, 'pick_func' : flexsim.transform.drop_few_clusters, 'verbose' : True}
+    obj.modify_volume(flexsim.transform.remove_air_clusters, kwargs)
+    
+    proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
+    proj.read_flexray_geometry(obj_folder, (0, 360), 4)
+    proj.create_projection(0, out_fo, 90)
+    stat_line = get_avocado_volume_stats(obj)
+    with open(out_fo / "volume_info.csv", "w") as f:
+        f.write("Peel,Meat,Seed,Air,Sample_class\n")
+        f.write(stat_line)
     
 def avocado_basic_augmentation(config_fname, input_folder, out_subfolder, remove_air = False, vol_counts = np.array([0, 1, 0, 0])):
-    '''Generates projections without augmentation to get GT.
+    '''
     '''
     config = flexsim.utils.read_config(config_fname)
     
@@ -289,27 +109,20 @@ def avocado_basic_augmentation(config_fname, input_folder, out_subfolder, remove
     obj = flexsim.ObjectCreator(obj_shape, mat)
     obj.set_flexray_volume(obj_vol_folder)
     
-    mode = 'remove_fraction_of_air'
-    
-    if mode == 'remove_all_air':
-        if remove_air:
+    if remove_air:
+        remove_all_flag = np.random.randint(0, 2)
+        if remove_all_flag == 0:
             obj.replace_material(4, 2)
-    
-    if mode == 'remove_fraction_of_air':
-        if remove_air:
-            remove_all = np.random.randint(0, 3)
-            print(remove_all)
-            if remove_all == 0:
-                obj.replace_material(4, 2)
-            else:
-                fruit_volume = vol_counts.sum()
-                print(vol_counts)
-                print(fruit_volume)
-                tg_percentage = np.random.uniform(0., 0.01)
-                tg_count = int(fruit_volume * tg_percentage)
-                print(tg_percentage, tg_count)
-                total_clusters = 20
-                obj.split_clusters(4, 2, total_clusters, tg_count, True)
+        else:
+            fruit_volume = vol_counts.sum()
+            print(vol_counts)
+            print(fruit_volume)
+            tg_percentage = np.random.uniform(0., 0.005)
+            tg_count = int(fruit_volume * tg_percentage)
+            print(tg_percentage, tg_count)
+            total_clusters = 20
+            kwargs = {'src_num' : 4, 'dest_num' : 2, 'num_classes' : total_clusters, 'tg_count' : tg_count, 'pick_func' : flexsim.transform.keep_few_clusters, 'verbose' : True}
+            obj.modify_volume(flexsim.transform.remove_air_clusters, kwargs)
         
     proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
     proj.read_flexray_geometry(obj_folder, (0, 360), 4)
@@ -319,6 +132,28 @@ def avocado_basic_augmentation(config_fname, input_folder, out_subfolder, remove
     with open(out_folder / "volume_info.csv", "w") as f:
         f.write("Peel,Meat,Seed,Air,Sample_class\n")
         f.write(stat_line)
+        
+def batch_generation(config_fname, generation_base_samples):
+    config = flexsim.utils.read_config(config_fname)
+    # The samples will be generated in pairs, so //2
+    augmentation_samples = config['Simulation']['augmentation_samples'] // 2
+    
+    input_root = Path("../../../Data/Generation/Avocado/Training/")
+    subfolders = []
+    vol_counts = {}
+    for sample in generation_base_samples:
+        path = input_root / sample
+        data = np.loadtxt(path / 'volume_info.csv', skiprows=1, delimiter=',', dtype=int)
+        sample_class = data[-1]
+        assert sample_class == 1
+        vol_counts[sample] = data[:-1]
+        
+    for sample in generation_base_samples:
+        sample_basename = "{}{}".format(sample.split('_')[0], sample.split('_')[1])
+        print(sample_basename)
+        for i in tqdm(range(augmentation_samples)):
+            aug_name = "{}mod{:03d}".format(sample_basename, i)
+            avocado_generation(config_fname, input_root / sample, "{}_nofo".format(aug_name), "{}_fo".format(aug_name), vol_counts[sample])
     
 def batch_basic_augmentation(config_fname):
     input_root = Path("../../../Data/Generation/Avocado/Training/")
@@ -350,8 +185,8 @@ def batch_replication(config_fname):
     subfolders = sorted(subfolders)
     print(subfolders)
     
-    for subfolder in subfolders[:]:
-        avocado_basic_augmentation(config_fname, input_root / subfolder, "{}_noiseless".format(subfolder), False)
+    for subfolder in subfolders[1:2]:
+        avocado_basic_augmentation(config_fname, input_root / subfolder, "{}_noisy".format(subfolder), False)
             
 if __name__ == "__main__":
     config_fname = "avocado.ini"
@@ -364,4 +199,8 @@ if __name__ == "__main__":
     #batch_replication(config_fname)
     
     # Generate new volumes by removing air
-    batch_basic_augmentation(config_fname)
+    #batch_basic_augmentation(config_fname)
+    
+    # Generate new volumes using affine transformations
+    generation_base_samples = ['s05_d09']
+    batch_generation(config_fname, generation_base_samples)
