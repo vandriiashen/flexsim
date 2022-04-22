@@ -27,14 +27,13 @@ class ObjectCreator(object):
         '''
         self.volume = np.zeros(size, dtype = int)
         self.size = size
-        #self.voxel_size = 0.114723907 # in mm, account for this later
         self.mat = matHandler
         
     def get_volume(self):
-        return self.volume
+        return np.copy(self.volume)
     
     def set_volume(self, volume):
-        self.volume = volume
+        self.volume = np.copy(volume)
         
     def set_flexray_volume(self, obj_folder):
         '''Initializes object volume by reading it from the folder
@@ -70,4 +69,4 @@ class ObjectCreator(object):
         
         h = self.volume.shape[0]
         for i in range(h):
-            imageio.imsave(folder / '{:06d}.tiff'.format(i), self.volume[i,:,:].astype(np.int32))
+            imageio.imsave(folder / '{:06d}.tiff'.format(i), self.volume[i,:,:].astype(np.int8))

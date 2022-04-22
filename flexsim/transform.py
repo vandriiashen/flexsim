@@ -5,6 +5,7 @@ Every function receives volume as an argument and returns volume after modificat
 import numpy as np
 from voltools import transform
 import skimage
+import scipy
             
 def replace_material(volume, src_num, dest_num):
     '''Changes material in voxels from source to dest.
@@ -20,13 +21,13 @@ def replace_material(volume, src_num, dest_num):
 def replace_material_cluster(volume, src_num, dest_num, num_clusters):
     '''Changes material in voxels from source to dest based on cluster structure.
     '''
-    labels, nfeatures = scipy.ndimage.label(self.volume == src_num)
+    labels, nfeatures = scipy.ndimage.label(volume == src_num)
     assert num_clusters <= nfeatures
     for i in range(num_clusters):
         volume[labels == i+1] = dest_num
         
     return volume
-        
+"""
 def remove_material_clusters(volume, src_num, dest_num, num_keep):
     '''Compute clusters of voxels filled with a certain material.
     '''
@@ -43,6 +44,7 @@ def remove_material_clusters(volume, src_num, dest_num, num_keep):
         volume[labels == prop.label] = src_num
     
     return volume
+"""
         
 def keep_few_clusters(class_sizes, tg_count):
     sorted_sizes = sorted(class_sizes.items(), key = lambda x: x[1], reverse=True)
@@ -146,7 +148,41 @@ def affine_volume(volume, mat_num, scale, shear, rotation, translation):
         tmp_res = transform(tmp_vol, interpolation='linear', device='cpu', 
                             scale=scale, shear=shear, translation=translation, rotation=rotation, rotation_units='deg', rotation_order='rzxz')
         tmp_res = tmp_res.astype(bool)
-        tmp_res = skimage.morphology.binary_dilation(tmp_res)
+        for k in range(2):
+            tmp_res = skimage.morphology.binary_dilation(tmp_res)
         res_vol[tmp_res] = i
             
+    return res_vol
+
+def duplicate_affine_pebble(volume, scale, shear, rotation, translation):
+    res_vol = np.zeros_like(volume, dtype=int)
+    res_vol[volume != 0] = 1
+    
+    tmp_vol = np.zeros_like(volume, dtype=bool)
+    tmp_vol[volume == 2] = True
+    for i in range(2):
+        tmp_res = transform(tmp_vol, interpolation='linear', device='cpu', 
+                            scale=scale[3*i:3*(i+1)], shear=shear[3*i:3*(i+1)], translation=translation[3*i:3*(i+1)], 
+                            rotation=rotation[3*i:3*(i+1)], rotation_units='deg', rotation_order='rzxz')
+        tmp_res = tmp_res.astype(bool)
+        for k in range(2):
+            tmp_res = skimage.morphology.binary_dilation(tmp_res)
+        res_vol[tmp_res] = 2
+    
+    return res_vol
+
+def affine_pebble(volume, scale, shear, rotation, translation):
+    res_vol = np.zeros_like(volume, dtype=int)
+    res_vol[volume != 0] = 1
+    
+    tmp_vol = np.zeros_like(volume, dtype=bool)
+    tmp_vol[volume == 2] = True
+    tmp_res = transform(tmp_vol, interpolation='linear', device='cpu', 
+                        scale=scale, shear=shear, translation=translation, 
+                        rotation=rotation, rotation_units='deg', rotation_order='rzxz')
+    tmp_res = tmp_res.astype(bool)
+    for k in range(2):
+        tmp_res = skimage.morphology.binary_dilation(tmp_res)
+    res_vol[tmp_res] = 2
+    
     return res_vol

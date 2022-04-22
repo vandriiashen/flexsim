@@ -236,7 +236,6 @@ def count_materials(input_folder, output_folder):
     air_count = np.count_nonzero(segm == 4)
     seed_com = scipy.ndimage.center_of_mass(segm == 3)
     
-    #print("Peel,Avocado,Seed,Air,Seed_COM")
     print("{},{},{},{},{}".format(path.name, peel_count, avocado_count, seed_count, air_count))
         
 def check_intensity(output_folder):
@@ -294,7 +293,7 @@ def multiple_objects_process():
     output_root = Path('/export/scratch2/vladysla/Data/Generation/Avocado/Training')
     
     sub_folders = []
-    
+    '''
     fruit_numbers = list(range(1, 13))
     for num in fruit_numbers:
         sub_folders.append('s{:02d}_d01'.format(num))
@@ -305,7 +304,8 @@ def multiple_objects_process():
     remove_obj = ['s01_d01', 's03_d06', 's03_d09', 's06_d01', 's08_d01', 's09_d06', 's10_d06']
     for obj in remove_obj:
         sub_folders.remove(obj)
-    
+    '''
+    sub_folders = ['s05_d09']
     print(sub_folders)
     print(len(sub_folders))
     input_folders = [input_root / sub_folder for sub_folder in sub_folders]
@@ -316,14 +316,14 @@ def multiple_objects_process():
         print(input_folders[i])
         output_folders[i].mkdir(exist_ok=True)
         
-        preprocess_proj(input_folders[i], output_folders[i], 2)
-        shutil.copy(input_folders[i] / 'scan settings.txt', output_folders[i])
-        reconstruct(input_folders[i], output_folders[i], bh_correction=True, compound='H2O', density=0.6)
-        segment(input_folders[i], output_folders[i])
+        #preprocess_proj(input_folders[i], output_folders[i], 2)
+        #shutil.copy(input_folders[i] / 'scan settings.txt', output_folders[i])
+        #reconstruct(input_folders[i], output_folders[i], bh_correction=True, compound='H2O', density=0.6)
+        #segment(input_folders[i], output_folders[i])
         
         # Check average attenuation for every label
-        #reconstruct(input_folders[i], output_folders[i], bh_correction=False)
-        #check_intensity(output_folders[i])
+        reconstruct(input_folders[i], output_folders[i], bh_correction=False)
+        check_intensity(output_folders[i])
         
 if __name__ == "__main__":
     multiple_objects_process()
