@@ -24,6 +24,8 @@ def write_avocado_volume_stats(obj, out_folder):
         f.write(stat_line)
 
 def modify_main_object(obj):
+    ''' Object modification function that performs affine transformation of the whole object
+    '''
     scale = np.random.uniform(0.8, 1.2, size=(3,))
     shear = np.random.uniform(-0.2, 0.2, size=(3,))
     rotation = (0., 0., 0.)
@@ -33,9 +35,8 @@ def modify_main_object(obj):
     obj.modify_volume(flexsim.transform.affine_volume, kwargs)
     
 def gen_class0_air(obj, fruit_volume):
-    #t2
-    #tg_percentage = np.random.uniform(0., 0.01)
-    #t3
+    ''' Object modification function that removes air from the object to create a Class 0 sample.
+    '''
     tg_percentage = loguniform.rvs(1e-4, 0.01)
     tg_count = int(fruit_volume * tg_percentage)
     total_clusters = 20
@@ -43,19 +44,32 @@ def gen_class0_air(obj, fruit_volume):
     obj.modify_volume(flexsim.transform.remove_air_clusters, kwargs)
     
 def gen_class1_air(obj, fruit_volume):
-    #t2
-    #tg_percentage = np.random.uniform(0.01, 0.05)
-    #t3
+    ''' Object modification function that removes a small amount of air, and the resulting sample is still in Class 1.
+    '''
     tg_percentage = loguniform.rvs(0.01, 0.05)
     tg_count = int(fruit_volume * tg_percentage)
     total_clusters = 6
     kwargs = {'src_num' : 4, 'dest_num' : 2, 'num_classes' : total_clusters, 'tg_count' : tg_count, 'pick_func' : flexsim.transform.drop_few_clusters, 'verbose' : True}
     obj.modify_volume(flexsim.transform.remove_air_clusters, kwargs)
     
+def remove_air_equidistant(obj, fruit_volume, total_samples, num):
+    ''' Object modification function that removes air from the object to create a Class 0 sample.
+    In this case, the target amount of air is chosen without random number generation.
+    The target percentages are distributed from 0% to 1% with a constant step defined by the total number of samples.
+    '''
+    percentages = np.linspace(0., 0.01, total_samples, endpoint=False)
+    print(percentages)
+    tg_percentage = percentages[num]
+    tg_count = int(fruit_volume * tg_percentage)
+    total_clusters = 20
+    kwargs = {'src_num' : 4, 'dest_num' : 2, 'num_classes' : total_clusters, 'tg_count' : tg_count, 'pick_func' : flexsim.transform.keep_few_clusters, 'verbose' : True}
+    obj.modify_volume(flexsim.transform.remove_air_clusters, kwargs)
+    
 def avocado_pair_generation(config_fname, input_folder, output_subfolders):
+    ''' Create an artificial volume and the corresponding X-ray projections.
+    This function is used for complex generation, it supports MO and FO modification
     '''
-    '''
-    print("Pair generation")
+    
     config = flexsim.utils.read_config(config_fname)
     
     obj_vol_folder = input_folder / "segm"
@@ -92,58 +106,11 @@ def avocado_pair_generation(config_fname, input_folder, output_subfolders):
         obj.save_volume(out_folders[i])
         write_avocado_volume_stats(obj, out_folders[i])
         
-def avocado_generation(config_fname, input_folder, output_subfolders, vol_counts):
+def avocado_basic_augmentation(config_fname, input_folder, out_subfolder, total_samples = 1, num = 0, remove_air = False):
+    ''' Create an artificial volume and the corresponding X-ray projections.
+    This function is used for replication and basic augmentation, it only allows FO modification.
     '''
-    '''
-    config = flexsim.utils.read_config(config_fname)
     
-    obj_vol_folder = input_folder / "segm"
-    out_folders = []
-    for subfolder in output_subfolders:
-        out_folder = Path(config['Paths']['out_folder']) / subfolder
-        out_folder.mkdir(exist_ok = True)
-        out_folders.append(out_folder)
-    out_samples = len(out_folders)
-    
-    num_angles = config['Simulation']['num_angles']
-    energy_bins = config['Simulation']['energy_bins']
-    fruit_volume = vol_counts.sum()
-    
-    obj_shape = flexsim.utils.get_volume_properties(obj_vol_folder)
-    mat = flexsim.MaterialHandler(energy_bins, config['Materials'])
-    obj = flexsim.ObjectCreator(obj_shape, mat)
-    
-    proj_shape = (obj_shape[0], num_angles, obj_shape[2])
-    noise = flexsim.NoiseModel(proj_shape, config['Noise'])
-    proj = flexsim.Projector(obj, mat, noise, config['Simulation'])
-    proj.read_flexray_geometry(input_folder, (0, 360), 4)
-        
-    sample_operations = [gen_class0_air, gen_class1_air]
-    for i in range(out_samples):
-        obj.set_flexray_volume(obj_vol_folder)
-        modify_main_object(obj)
-        sample_operations[i](obj, fruit_volume)
-        proj.create_projection(0, out_folders[i], 90)
-        write_avocado_volume_stats(obj, out_folders[i])
-        
-def inpainting_remove_air(obj, fruit_volume):
-    remove_all_flag = np.random.randint(0, 2)
-    if remove_all_flag == 0:
-        obj.replace_material(4, 2)
-    else:
-        
-        print(vol_counts)
-        print(fruit_volume)
-        tg_percentage = np.random.uniform(0., 0.005)
-        tg_count = int(fruit_volume * tg_percentage)
-        print(tg_percentage, tg_count)
-        total_clusters = 20
-        kwargs = {'src_num' : 4, 'dest_num' : 2, 'num_classes' : total_clusters, 'tg_count' : tg_count, 'pick_func' : flexsim.transform.keep_few_clusters, 'verbose' : True}
-        obj.modify_volume(flexsim.transform.remove_air_clusters, kwargs)
-        
-def avocado_basic_augmentation(config_fname, input_folder, out_subfolder, remove_air = False):
-    '''
-    '''
     config = flexsim.utils.read_config(config_fname)
     
     obj_vol_folder = input_folder / "segm"
@@ -165,19 +132,21 @@ def avocado_basic_augmentation(config_fname, input_folder, out_subfolder, remove
     obj.set_flexray_volume(obj_vol_folder)
     fruit_volume = obj.get_stats().sum()
     if remove_air:
-        #inpainting_remove_air(obj, fruit_volume)
-        gen_class0_air(obj, fruit_volume)
+        remove_air_equidistant(obj, fruit_volume, total_samples, num)
         
     proj.create_projection(0, out_folder, 90)
     obj.save_volume(out_folder)
     write_avocado_volume_stats(obj, out_folder)
         
-def batch_generation(config_fname, generation_base_samples):
+def batch_generation(input_root, config_fname, generation_base_samples):
+    '''Create new X-ray images by modifying the main and foreign object.
+    The number of artificial volumes to generate is taken from the config file.
+    '''
+    
     config = flexsim.utils.read_config(config_fname)
     # The samples will be generated in pairs, so //2
     augmentation_samples = config['Simulation']['augmentation_samples'] // 2
     
-    input_root = Path("../../../Data/Generation/Avocado/Training/")
     subfolders = []
     for sample in generation_base_samples:
         path = input_root / sample
@@ -194,12 +163,12 @@ def batch_generation(config_fname, generation_base_samples):
             
             # Training in pairs
             avocado_pair_generation(config_fname, input_root / sample, out_folders)
-            # Training samples with different main object modifications
-            #avocado_generation(config_fname, input_root / sample, out_folders, vol_counts[sample])
             
+def batch_basic_augmentation(input_root, config_fname, sample_num = -1):
+    '''Create new X-ray projections by only modifying the foreign object.
+    For every real sample, two artificial objects are created.
+    '''
     
-def batch_basic_augmentation(config_fname):
-    input_root = Path("../../../Data/Generation/Avocado/Training/")
     subfolders = []
     vol_counts = {}
     for path in input_root.iterdir():
@@ -214,13 +183,24 @@ def batch_basic_augmentation(config_fname):
     subfolders = sorted(subfolders)
     print(subfolders)
     
+    if sample_num != -1:
+        subfolders = subfolders[:sample_num]
+    
+    total_samples = len(subfolders)
+    num = 0
+    
     for subfolder in subfolders[:]:
         print(subfolder)
-        avocado_basic_augmentation(config_fname, input_root / subfolder, "{}_fo".format(subfolder), False)
-        avocado_basic_augmentation(config_fname, input_root / subfolder, "{}_nofo".format(subfolder), True)
+        avocado_basic_augmentation(config_fname, input_root / subfolder, "{}_fo".format(subfolder), total_samples, num, False)
+        avocado_basic_augmentation(config_fname, input_root / subfolder, "{}_nofo".format(subfolder), total_samples, num, True)
+        num += 1
         
-def batch_replication(config_fname):
-    input_root = Path("../../../Data/Generation/Avocado/Training/")
+def batch_replication(input_root, config_fname):
+    ''' Simulate X-ray projections based on their reconstructions without any volume modification.
+    This function is used to compare the neural network performance when trained on artifical data with training on real data.
+    Noise properties can be changed in config to test noiseless and noisy data
+    '''
+    
     subfolders = []
     for path in input_root.iterdir():
         if path.is_dir():
@@ -233,18 +213,18 @@ def batch_replication(config_fname):
             
 if __name__ == "__main__":
     config_fname = "avocado.ini"
-    # use different seeds for training and validation
-    #random_seed = 6
-    random_seed = 7
+    input_root = Path("/path/to/data")
+    random_seed = 6
+    
     np.random.seed(seed = random_seed)
     random.seed(random_seed)
     
     # Generate simulated projections based on real volume
-    #batch_replication(config_fname)
+    #batch_replication(input_root, config_fname)
     
     # Generate new volumes by removing air
-    batch_basic_augmentation(config_fname)
+    #batch_basic_augmentation(input_root, config_fname, 4)
     
     # Generate new volumes using affine transformations
-    generation_base_samples = ['s05_d09']
-    #batch_generation(config_fname, generation_base_samples)
+    generation_base_samples = ['s07_d09']
+    batch_generation(input_root, config_fname, generation_base_samples)

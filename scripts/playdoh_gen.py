@@ -5,7 +5,6 @@ from scipy import ndimage
 import skimage
 from tqdm import tqdm
 import shutil
-
 import flexsim
     
 def write_playdoh_volume_stats(obj, out_folder):
@@ -20,12 +19,16 @@ def write_playdoh_volume_stats(obj, out_folder):
         f.write(stat_line)
         
 def remove_stone_objects(obj, remove_fo):
+    '''Simple object modification function that removes FOs from the volume.
+    '''
     kwargs = {'src_num' : 2, 'dest_num' : 1, 'num_clusters' : remove_fo}
     obj.modify_volume(flexsim.transform.replace_material_cluster, kwargs)
     
 def playdoh_basic_augmentation(config_fname, input_folder, out_subfolder, remove_fo = 0):
-    '''Generates projections without augmentation to get GT.
+    ''' Create an artificial volume and the corresponding X-ray projections.
+    This function is used for replication and basic augmentation, it only allows FO modification.
     '''
+    
     config = flexsim.utils.read_config(config_fname)
     
     obj_vol_folder = input_folder / "segm"
@@ -53,6 +56,8 @@ def playdoh_basic_augmentation(config_fname, input_folder, out_subfolder, remove
     write_playdoh_volume_stats(obj, out_folder)
     
 def modify_main_object(obj):
+    ''' Object modification function that performs affine transformation of the whole object
+    '''
     scale = np.random.uniform(0.8, 1.2, size=(3,))
     shear = np.random.uniform(-0.2, 0.2, size=(3,))
     rotation = np.random.uniform(-90., 90., size=(3,))
@@ -62,27 +67,27 @@ def modify_main_object(obj):
     obj.modify_volume(flexsim.transform.affine_volume, kwargs)
     
 def modify_duplicate_foreign_object(obj):
+    '''Object modification function that creates two FOs by performing affine transformations on one real FO.
+    '''
+    
     #size = 6 because we generate parameters for two tranformations
     scale = np.random.uniform(0.6, 1.8, size=(6,))
     shear = np.random.uniform(-0.2, 0.2, size=(6,))
     rotation = np.random.uniform(-10., 10., size=(6,))
-    translation = np.random.uniform(-50., 50., size=(6,))
+    translation1 = np.random.uniform(20., 60., size=(3,))
+    translation2 = np.random.uniform(-60., -20., size=(3,))
+    translation = np.concatenate((translation1, translation2))
     print("Foreign object transformation #1: {}, {}, {}, {}".format(scale[:3], shear[:3], rotation[:3], translation[:3]))
     print("Foreign object transformation #2: {}, {}, {}, {}".format(scale[3:], shear[3:], rotation[3:], translation[3:]))
     kwargs = {'scale' : scale, 'shear' : shear, 'rotation' : rotation, 'translation' : translation}
     obj.modify_volume(flexsim.transform.duplicate_affine_pebble, kwargs)
     
-def modify_foreign_object(obj):
-    #size = 6 because we generate parameters for two tranformations
-    scale = np.random.uniform(0.6, 1.8, size=(3,))
-    shear = np.random.uniform(-0.2, 0.2, size=(3,))
-    rotation = np.random.uniform(-30., 30., size=(3,))
-    translation = np.random.uniform(-50., 50., size=(3,))
-    print("Foreign object transformation: {}, {}, {}, {}".format(scale, shear, rotation, translation))
-    kwargs = {'scale' : scale, 'shear' : shear, 'rotation' : rotation, 'translation' : translation}
-    obj.modify_volume(flexsim.transform.affine_pebble, kwargs)
     
 def playdoh_triple_generation(config_fname, input_folder, output_subfolders):
+    ''' Create artificial volumes and the corresponding X-ray projections.
+    This function is used for complex generation, it supports MO and FO modification
+    '''
+    
     print("Triple generation")
     config = flexsim.utils.read_config(config_fname)
     
@@ -107,7 +112,7 @@ def playdoh_triple_generation(config_fname, input_folder, output_subfolders):
     proj.read_flexray_geometry(input_folder, (0, 360), 2)
     
     obj.set_flexray_volume(obj_vol_folder)
-    # Modifications go here
+
     modify_main_object(obj)
     # Make two foreign object by applying affine transformation twice. Make sure that two separate objects are generated
     num_fo = 1
@@ -115,7 +120,6 @@ def playdoh_triple_generation(config_fname, input_folder, output_subfolders):
     while num_fo != 2:
         obj.set_volume(volume_save)
         modify_duplicate_foreign_object(obj)
-        #modify_foreign_object(obj)
         labels, nfeatures = ndimage.label(obj.volume == 2)
         props = skimage.measure.regionprops(labels)
         print("Number of FO = {}".format(nfeatures))
@@ -134,12 +138,15 @@ def playdoh_triple_generation(config_fname, input_folder, output_subfolders):
         obj.save_volume(out_folders[i])
         write_playdoh_volume_stats(obj, out_folders[i])
         
-def batch_generation(config_fname, generation_base_samples):
+def batch_generation(input_root, config_fname, generation_base_samples):
+    '''Create new X-ray images by modifying the main and foreign object.
+    The number of artificial volumes to generate is taken from the config file.
+    '''
+    
     config = flexsim.utils.read_config(config_fname)
     # The samples will be generated in groups of 3, so //3
     augmentation_samples = config['Simulation']['augmentation_samples'] // 3
     
-    input_root = Path("../../../Data/Generation/Playdoh/Training/")
     subfolders = []
     for sample in generation_base_samples:
         path = input_root / sample
@@ -155,8 +162,11 @@ def batch_generation(config_fname, generation_base_samples):
             out_folders = ["{}_2fo".format(aug_name), "{}_1fo".format(aug_name), "{}_0fo".format(aug_name)]
             playdoh_triple_generation(config_fname, input_root / sample, out_folders)
     
-def batch_basic_augmentation(config_fname):
-    input_root = Path("../../../Data/Generation/Playdoh/Training/")
+def batch_basic_augmentation(input_root, config_fname):
+    '''Create new X-ray projections by only modifying the foreign object.
+    For every real sample, three artificial objects are created. The original sample is from Class 2.
+    '''
+    
     subfolders = []
     for path in input_root.iterdir():
         if path.is_dir():
@@ -167,13 +177,17 @@ def batch_basic_augmentation(config_fname):
     subfolders = sorted(subfolders)
     print(subfolders)
     
-    for subfolder in subfolders[:1]:
+    for subfolder in subfolders[:]:
         playdoh_basic_augmentation(config_fname, input_root / subfolder, "{}_2fo".format(subfolder), 0)
         playdoh_basic_augmentation(config_fname, input_root / subfolder, "{}_1fo".format(subfolder), 1)
         playdoh_basic_augmentation(config_fname, input_root / subfolder, "{}_0fo".format(subfolder), 2)
         
-def batch_replication(config_fname):
-    input_root = Path("../../../Data/Generation/Playdoh/Training/")
+def batch_replication(input_root, config_fname):
+    ''' Simulate X-ray projections based on their reconstructions without any volume modification.
+    This function is used to compare the neural network performance when trained on artifical data with training on real data.
+    Noise properties can be changed in config to test noiseless and noisy data
+    '''
+    
     subfolders = []
     for path in input_root.iterdir():
         if path.is_dir():
@@ -181,19 +195,20 @@ def batch_replication(config_fname):
     subfolders = sorted(subfolders)
     print(subfolders)
     
-    for subfolder in subfolders[1:2]:
+    for subfolder in subfolders[:]:
         playdoh_basic_augmentation(config_fname, input_root / subfolder, "{}_noisy".format(subfolder), 0)
     
 if __name__ == "__main__":
     config_fname = "playdoh.ini"
+    input_root = Path("/path/to/data")
     np.random.seed(seed = 6)
     
     # Generate simulated projections based on real volume
-    #batch_replication(config_fname)
+    #batch_replication(input_root, config_fname)
     
     # Generate new volumes by removing clusters of stone
-    #batch_basic_augmentation(config_fname)
+    #batch_basic_augmentation(input_root, config_fname)
     
     # Generate new volumes using affine transformations
-    generation_base_samples = ['Object10_Scan20W', 'Object16_Scan20W', 'Object17_Scan20W']
-    batch_generation(config_fname, generation_base_samples)
+    generation_base_samples = ['Object10_Scan20W']
+    batch_generation(input_root, config_fname, generation_base_samples)

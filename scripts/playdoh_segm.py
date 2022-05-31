@@ -31,7 +31,7 @@ def apply_median_filter(vol, size):
     return vol_cpu
 
 def reconstruct(input_folder, output_folder, bh_correction = True, compound = 'H2O', density = 0.6):
-    '''Reconstructs the volume using flexbox. Slices will be written to recon/ subfolder.
+    '''Reconstructs the volume using flexbox. Supports beam-hardening correction, and that is crucial for good segmentation.
     '''
     path = output_folder
     if bh_correction == True:
@@ -60,7 +60,8 @@ def reconstruct(input_folder, output_folder, bh_correction = True, compound = 'H
     data.write_stack(save_path, 'slice', vol, dim = 0)
     
 def segment(input_folder, output_folder, otsu_classes):
-    '''Segments every slice with thresholding. Segmented slices will be written to segm/ subfolder.
+    '''Performs segmentation of the reconstructed volume.
+    The number of classes for otsu should be explicitly given by the user.
     '''
     path = output_folder
     recon_path = path / "recon_bh"

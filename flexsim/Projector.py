@@ -39,13 +39,7 @@ class Projector(object):
         self.geom = flexdata.data.parse_flexray_scansettings(path, sample=sampling)
         self.geom = flexdata.correct.correct(self.geom, profile='cwi-flexray-2019-04-24', do_print_changes=True)
         self.geom = flexdata.correct.correct_vol_center(self.geom)
-        
-        # Calibration fixes
-        '''
-        self.geom.parameters['src_ort'] += (7-5.5) #see below for flexbox hard coded values
-        self.geom['det_roll'] -= 0.25
-        '''
-        
+
         self.geom.parameters['ang_range'] = ang_range
         obj_shape = self.obj.size
         width = obj_shape[2]

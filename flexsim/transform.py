@@ -27,39 +27,6 @@ def replace_material_cluster(volume, src_num, dest_num, num_clusters):
         volume[labels == i+1] = dest_num
         
     return volume
-"""
-def remove_material_clusters(volume, src_num, dest_num, num_keep):
-    '''Compute clusters of voxels filled with a certain material.
-    '''
-    labels, nfeatures = scipy.ndimage.label(volume == src_num)
-    props = skimage.measure.regionprops(labels)
-        
-    propL = []
-    for prop in props:
-        propL.append ((prop.area, prop))
-    propL = sorted (propL, key=lambda r:r[0], reverse=True)
-        
-    for i in range(min(num_keep, len(propL))):
-        area, prop = propL[i]
-        volume[labels == prop.label] = src_num
-    
-    return volume
-"""
-        
-def keep_few_clusters(class_sizes, tg_count):
-    sorted_sizes = sorted(class_sizes.items(), key = lambda x: x[1], reverse=True)
-    cluster_seq = []
-        
-    max_class_num = 3
-    for i in range(max_class_num):
-        for k, v in sorted_sizes:
-            if v < tg_count:
-                cluster_seq.append(k)
-                tg_count -= v
-                sorted_sizes.remove((k, v))
-                break
-            
-    return cluster_seq
 
 def keep_few_clusters(class_sizes, tg_count):
     sorted_sizes = sorted(class_sizes.items(), key = lambda x: x[1], reverse=True)
@@ -167,6 +134,10 @@ def duplicate_affine_pebble(volume, scale, shear, rotation, translation):
         tmp_res = tmp_res.astype(bool)
         for k in range(2):
             tmp_res = skimage.morphology.binary_dilation(tmp_res)
+            
+        #Only allow pebbles to be inside the main object
+        tmp_res[volume == 0] = False
+            
         res_vol[tmp_res] = 2
     
     return res_vol

@@ -26,6 +26,8 @@ def get_bounding_box(mask):
     return (zmin, zmax, ymin, ymax, xmin, xmax)
 
 def show3(title, vol) :
+    '''Slice visualization
+    '''
     shape = vol.shape
 
     midZ = (int)(shape[0]/2.)
@@ -53,7 +55,6 @@ def invert_volume(vol):
 
 def apply_median_filter(vol, size):
     ''' Applies median filter to the volume using GPU acceleration (`cupyx.scipy.ndimage.median_filter`).
-        
     '''
     vol_gpu = cupy.asarray(vol)
     vol_gpu = cupyx.scipy.ndimage.median_filter(vol_gpu, size)
@@ -67,7 +68,7 @@ def apply_median_filter(vol, size):
     return vol_cpu
 
 def reconstruct(input_folder, output_folder, bh_correction = True, compound = 'H2O', density = 0.6):
-    '''Reconstructs the volume using flexbox. Slices will be written to recon/ subfolder.
+    '''Reconstructs the volume using flexbox. Supports beam-hardening correction, and that is crucial for good segmentation.
     '''
     path = output_folder
     if bh_correction == True:
@@ -96,6 +97,8 @@ def reconstruct(input_folder, output_folder, bh_correction = True, compound = 'H
     data.write_stack(save_path, 'slice', vol, dim = 0)
     
 def segment(input_folder, output_folder, verbose = True):
+    '''Performs segmentation of the reconstructed volume.
+    '''
     path = output_folder
     recon_path = path / "recon_bh"
     segm_path = path / "segm"
@@ -287,10 +290,10 @@ def preprocess_proj(input_folder, output_folder, skip_proj):
         imageio.imwrite(log_path / "scan_{:06d}.tiff".format(i), proj[:,i,:])    
         
 def multiple_objects_process():
-    input_root = Path('/export/scratch2/vladysla/Data/Real/Avocado_extra/')
-    #input_root = Path('/export/scratch2/vladysla/Data/Real/AvocadoSet/')
-    #input_root = Path('/export/scratch2/vladysla/Data/Real/AvocadoScans/')
-    output_root = Path('/export/scratch2/vladysla/Data/Generation/Avocado/Training')
+    #input_root = Path('/export/scratch2/vladysla/Data/Real/Avocado/Avocado_extra/')
+    #input_root = Path('/export/scratch2/vladysla/Data/Real/Avocado/AvocadoSet/')
+    input_root = Path('/export/scratch2/vladysla/Data/Real/Avocado/AvocadoScans/')
+    output_root = Path('/export/scratch2/vladysla/Data/Simulation_paper_distr/Avocado/Test/')
     
     sub_folders = []
     '''
@@ -305,7 +308,8 @@ def multiple_objects_process():
     for obj in remove_obj:
         sub_folders.remove(obj)
     '''
-    sub_folders = ['s05_d09']
+    #sub_folders = ['s02_d01', 's02_d07', 's02_d08', 's02_d10', 's04_d08', 's04_d09', 's04_d10', 's06_d01', 's09_d01', 's09_d08', 's09_d10', 's11_d01', 's11_d09']
+    sub_folders = ['s13_d01', 's13_d04', 's14_d06', 's15_d06', 's16_d06', 's17_d06', 's17_d08']
     print(sub_folders)
     print(len(sub_folders))
     input_folders = [input_root / sub_folder for sub_folder in sub_folders]
@@ -316,14 +320,14 @@ def multiple_objects_process():
         print(input_folders[i])
         output_folders[i].mkdir(exist_ok=True)
         
-        #preprocess_proj(input_folders[i], output_folders[i], 2)
-        #shutil.copy(input_folders[i] / 'scan settings.txt', output_folders[i])
-        #reconstruct(input_folders[i], output_folders[i], bh_correction=True, compound='H2O', density=0.6)
-        #segment(input_folders[i], output_folders[i])
+        preprocess_proj(input_folders[i], output_folders[i], 4)
+        shutil.copy(input_folders[i] / 'scan settings.txt', output_folders[i])
+        reconstruct(input_folders[i], output_folders[i], bh_correction=True, compound='H2O', density=0.6)
+        segment(input_folders[i], output_folders[i])
         
         # Check average attenuation for every label
-        reconstruct(input_folders[i], output_folders[i], bh_correction=False)
-        check_intensity(output_folders[i])
+        #reconstruct(input_folders[i], output_folders[i], bh_correction=False)
+        #check_intensity(output_folders[i])
         
 if __name__ == "__main__":
     multiple_objects_process()
